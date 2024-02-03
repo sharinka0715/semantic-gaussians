@@ -1,0 +1,40 @@
+scene:
+  scene_path: "../nerf/datasets/dynamic_gaussians/blender/basketball"
+  dataset_name: "scannet_20"
+  test_cameras: False
+  colmap_images: "images"
+  colmap_eval_hold: 8
+  downscale_ratio: 1
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 0
+
+model:
+  sh_degree: 3
+  model_dir: "../nerf/datasets/dynamic_gaussians/output/pretrained/basketball"
+  dynamic: True
+  load_iteration: -1
+  num_timesteps: 150
+  device: "cuda:0"
+
+fusion:
+  img_dim: [640, 360]
+  model_2d: samclip # choose from openseg, groundingsam, vlpart
+  depth: render # choose from image, render, surface, none
+  depth_scale: 1000.0
+  visibility_threshold: 0.1
+  cut_boundary: 10
+  n_split_points: 9999999
+  num_rand_file_per_scene: 1
+  out_dir: "./fusion"
+
+render:
+  fusion_dir: "./fusion/0.pt"
+  view_scale: 1
+  dynamic_fps: 20
+

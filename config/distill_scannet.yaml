@@ -1,0 +1,40 @@
+scene:
+  scene_path: "../nerf/datasets/scannet_half/train"
+  test_cameras: False
+  colmap_images: "images"
+  colmap_eval_hold: 8
+  downscale_ratio: 1
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 1
+
+model:
+  sh_degree: 3
+  model_dir: "../nerf/datasets/scannet_gaussians/train"
+  dynamic: False
+  load_iteration: 10000
+  device: "cuda:0"
+
+fusion:
+  out_dir: "/mnt/bigai_ml/guojun"
+
+distill:
+  exp_name: openfastsam_resume
+  model_3d: MinkUNet34A
+  voxel_size: 0.02
+  aug: True
+  feature_rotation: False
+  lr: 0.001
+  epochs: 50
+  loss_type: cosine
+  schedule_milestones: [20, 40, 60, 80, 100]
+  schedule_gamma: 0.3
+  batch_size: 1
+  num_workers: 16
+  test_interval: 5
+  save_interval: 5

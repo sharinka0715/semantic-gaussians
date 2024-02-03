@@ -1,0 +1,40 @@
+scene:
+  scene_path: "../nerf/datasets/mvimgnet/"
+  test_cameras: False
+  colmap_images: "images"
+  colmap_eval_hold: 8
+  downscale_ratio: 1
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 1
+
+model:
+  sh_degree: 3
+  model_dir: "/media/guojun/2A2286A822867899/mvimgnet_gaussians/train/"
+  dynamic: False
+  load_iteration: 10000
+  device: "cuda:0"
+
+fusion:
+  out_dir: "/media/guojun/2A2286A822867899/mvimgnet_fusion_classname/"
+
+distill:
+  exp_name: mvimgnet_50000
+  model_3d: MinkUNet34A
+  voxel_size: 0.2
+  aug: True
+  feature_rotation: False
+  lr: 0.001
+  epochs: 50
+  loss_type: cosine
+  schedule_milestones: [10, 20, 30, 40, 50]
+  schedule_gamma: 0.3
+  batch_size: 2
+  num_workers: 8
+  test_interval: 5
+  save_interval: 5

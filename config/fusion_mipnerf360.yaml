@@ -1,0 +1,43 @@
+scene:
+  scene_path: "/home/guojun/winshare/nerf/datasets/mipnerf360/room"
+  dataset_name: "scannet_20"
+  test_cameras: False
+  colmap_images: "images_4"
+  colmap_eval_hold: 8
+  downscale_ratio: 1
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 0
+
+model:
+  sh_degree: 3
+  model_dir: "./output/mipnerf360/room_rotate"
+  dynamic: False
+  load_iteration: -1
+  device: "cuda:0"
+
+fusion:
+  img_dim: [779, 519]
+  model_2d: samclip # choose from openseg, groundingsam, vlpart
+  depth: render # choose from image, render, surface, none
+  depth_scale: 1000.0
+  use_sam_mask: False
+  visibility_threshold: 0.05
+  cut_boundary: 10
+  n_split_points: 9999999 #80000
+  num_rand_file_per_scene: 1 #5
+  out_dir: "./fusion"
+
+render:
+  fusion_dir: "./fusion/output.pt"
+  view_scale: 1
+
+distill:
+  model_3d: MinkUNet34A
+  model_dir: "./results_distill/3heads"
+  voxel_size: 0.02

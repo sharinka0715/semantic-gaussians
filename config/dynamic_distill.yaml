@@ -1,0 +1,39 @@
+scene:
+  scene_path: "/home/guojun/winshare/nerf/datasets/dynamic_gaussians/blender"
+  test_cameras: False
+  colmap_images: "images"
+  colmap_eval_hold: 8
+  downscale_ratio: 1
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 0
+
+model:
+  sh_degree: 3
+  model_dir: "/home/guojun/winshare/nerf/datasets/dynamic_gaussians/output/pretrained"
+  dynamic: True
+  load_iteration: 30000
+  device: "cuda:0"
+
+fusion:
+  out_dir: "/home/guojun/fillipo/guojun/dynamic_fusion"
+
+distill:
+  exp_name: dynamic_voxel001
+  model_3d: MinkUNet34A
+  voxel_size: 0.01
+  aug: True
+  lr: 0.001
+  epochs: 50
+  loss_type: cosine
+  schedule_milestones: [10, 20, 30, 40, 50]
+  schedule_gamma: 0.3
+  batch_size: 1
+  num_workers: 4
+  test_interval: 5
+  save_interval: 5

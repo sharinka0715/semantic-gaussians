@@ -1,0 +1,26 @@
+scene:
+  scene_path: "/home/guojun/winshare/nerf/datasets/mipnerf360/room"
+  test_cameras: False
+  colmap_images: "images_8"
+  colmap_eval_hold: 8
+  downscale_ratio: 1
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 0
+
+model:
+  sh_degree: 3
+  model_dir: "./output/mipnerf360/room"
+  load_iteration: -1
+  dynamic: False
+  dynamic_t: 0
+  device: "cuda:0"
+
+render:
+  fusion_dir: "./fusion/room.pt"
+  view_scale: 1

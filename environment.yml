@@ -1,0 +1,15 @@
+name: sega
+channels:
+  - nvidia/label/cuda-11.8.0
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - cuda=11.8.0
+  - pytorch-cuda=11.8
+  - plyfile=0.8.1
+  - python=3.9.18
+  - pytorch=2.1.1
+  - torchaudio=2.1.1
+  - torchvision=0.16.1
+  - pip==22.3.1

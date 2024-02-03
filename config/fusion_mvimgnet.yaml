@@ -1,0 +1,45 @@
+scene:
+  scene_path: "/home/guojun/winshare/nerf/datasets/mvimgnet/"
+  dataset_name: "scannet_20"
+  test_cameras: False
+  colmap_images: "images"
+  colmap_eval_hold: 8
+  downscale_ratio: 0.5
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 0
+
+model:
+  sh_degree: 3
+  model_dir: "/media/guojun/2A2286A822867899/mvimgnet_gaussians/"
+  dynamic: False
+  load_iteration: -1
+  device: "cuda:0"
+
+fusion:
+  img_dim: [540, 960]
+  num_workers: 8
+  use_sam_mask: False
+  model_2d: vlpart # choose from openseg, groundingsam, vlpart
+  depth: render
+  depth_scale: 1000.0
+  visibility_threshold: 0.25
+  outlier_threshold: -2.0
+  cut_boundary: 10
+  n_split_points: 50000
+  num_rand_file_per_scene: 5
+  out_dir: "/media/guojun/2A2286A822867899/mvimgnet_fusion_classname/"
+
+render:
+  fusion_dir: "./fusion/0.pt"
+  view_scale: 1
+
+# distill:
+#   model_3d: MinkUNet34A
+#   model_dir: "./results_distill/fusion80000"
+#   voxel_size: 0.2

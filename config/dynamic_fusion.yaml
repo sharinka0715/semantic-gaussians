@@ -1,0 +1,34 @@
+scene:
+  scene_path: "../nerf/datasets/dynamic_gaussians/blender/"
+  dataset_name: "scannet_20"
+  test_cameras: False
+  colmap_images: "images"
+  colmap_eval_hold: 8
+  downscale_ratio: 1
+  white_background: False
+  device: "cuda:0"
+  
+pipeline:
+  convert_shs_python: False
+  compute_cov3d_python: False
+  debug: False
+  seed: 0
+
+model:
+  sh_degree: 3
+  model_dir: "../nerf/datasets/dynamic_gaussians/output/pretrained"
+  dynamic: True
+  load_iteration: 30000
+  device: "cuda:0"
+
+fusion:
+  img_dim: [640, 360]
+  model_2d: samclip # choose from openseg, groundingsam, vlpart
+  use_depth: False
+  depth_scale: 1000.0
+  visibility_threshold: 0.1
+  outlier_threshold: -2.0
+  cut_boundary: 10
+  n_split_points: 9999999
+  num_rand_file_per_scene: 1
+  out_dir: "./fusion"
