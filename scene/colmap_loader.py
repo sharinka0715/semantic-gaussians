@@ -339,25 +339,6 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         R = np.transpose(qvec2rotmat(extr.qvec))
         T = np.array(extr.tvec)
 
-        # from jaxlie import SE3, SO3
-
-        # rot = SO3.from_matrix(qvec2rotmat(extr.qvec))
-        # c2w = SE3.from_rotation_and_translation(rot, np.array(extr.tvec)).inverse()
-        # w2new = SE3.from_rotation(SO3.from_rpy_radians(-120 * np.pi / 180, 0, -20 * np.pi / 180))
-        # c2new = w2new @ c2w
-
-        # scale = np.zeros((4, 4))
-        # scale[0, 0] = 0.5
-        # scale[1, 1] = 0.5
-        # scale[2, 2] = 0.5
-        # scale[3, 3] = 1
-
-        # c2new = scale @ c2new.as_matrix()
-        # w2c = np.linalg.inv(c2new)
-
-        # R = np.transpose(w2c[:3, :3])
-        # T = w2c[:3, 3]
-
         if intr.model == "SIMPLE_PINHOLE":
             focal_length_x = intr.params[0]
             focal_length_y = intr.params[0]
@@ -450,15 +431,6 @@ def readColmapInfo(path, images, eval, llffhold=8):
         pcd = fetchPly(ply_path)
     except:
         pcd = None
-
-    # from jaxlie import SE3, SO3
-
-    # w2new = SO3.from_rpy_radians(-120 * np.pi / 180, 0, -20 * np.pi / 180).as_matrix()
-    # points = (w2new @ pcd.points.T / 2).T
-
-    # from utils.graphics_utils import BasicPointCloud
-
-    # pcd = BasicPointCloud(points=points, colors=pcd.colors, normals=None)
 
     scene_info = SceneInfo(
         point_cloud=pcd,

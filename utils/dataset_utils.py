@@ -105,7 +105,7 @@ def read_cameras(path, ply_path, extensions=[".png", ".jpg"]):
     return cam_infos
 
 
-def load_gaussian_ply(path, feature_rotation=True):
+def load_gaussian_ply(path, feature_type="all"):
     plydata = PlyData.read(path)
 
     xyz = np.stack(
@@ -147,9 +147,10 @@ def load_gaussian_ply(path, feature_rotation=True):
     for idx, attr_name in enumerate(rot_names):
         rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
 
-    if feature_rotation:
+    if feature_type == "all":
         return xyz, np.concatenate([opacities, features_dc, features_extra, scales, rots], axis=-1)
-    return xyz, np.concatenate([opacities, features_dc, features_extra, scales], axis=-1)
+    elif feature_type == "color":
+        return xyz, np.concatenate([features_dc, features_extra], axis=-1)
     # return xyz, np.concatenate([features_dc, features_extra], axis=-1)
 
 

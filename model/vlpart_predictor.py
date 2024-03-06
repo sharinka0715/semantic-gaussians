@@ -23,26 +23,8 @@ class VLPart:
         vlpart_path,
         sam_path,
         text_model_name,
-        box_threshold=0.7,
+        box_threshold=0.3,
         predefined_classes=list(LVIS_PACO_VOCAB) + list(PASCAL_PART_VOCAB),
-        # predefined_classes=[
-        #     "guitar",
-        #     "guitar:headstock",
-        #     "guitar:fingerboard",
-        #     "guitar:hole",
-        #     "guitar:body",
-        #     "guitar:bridge",
-        # ]
-        # predefined_classes=[
-        #     "basketball",
-        #     "person:hair",
-        #     "person:head",
-        #     "person:arm",
-        #     "person:hand",
-        #     "person:leg",
-        #     "person:foot",
-        #     "person:torso",
-        # ],
         # predefined_classes=list(SCANNET_CLASS_LABELS_20),
     ):
         self.box_threshold = box_threshold
@@ -65,13 +47,18 @@ class VLPart:
         self.text_features = self.extract_text_feature(self.get_text(self.classes)).float()
 
     def set_predefined_cls(self, cls):
-        self.classes = ".".join([e for e in (list(PASCAL_PART_VOCAB) + list(LVIS_PACO_VOCAB)) if cls in e])
+        self.classes = ".".join(cls)
+        print(self.classes)
+        self.text_features = self.extract_text_feature(self.get_text(self.classes)).float()
+
+    def set_predefined_part(self, cls, parts):
+        self.classes = ".".join([f"{cls}:{e}" for e in parts])
         print(self.classes)
         self.text_features = self.extract_text_feature(self.get_text(self.classes)).float()
 
     def get_text(self, vocabulary, prefix_prompt="a "):
         vocabulary = vocabulary.split(".")
-        texts = [prefix_prompt + x.lower().replace(":", " ") for x in vocabulary]
+        texts = [prefix_prompt + x.lower().replace(":", " ").replace("_", " ") for x in vocabulary]
         texts_aug = texts + ["background"]
         return texts_aug
 

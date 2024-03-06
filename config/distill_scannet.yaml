@@ -1,5 +1,5 @@
 scene:
-  scene_path: "../nerf/datasets/scannet_half/train"
+  scene_path: "/PATH/TO/YOUR/OWN"
   test_cameras: False
   colmap_images: "images"
   colmap_eval_hold: 8
@@ -15,26 +15,29 @@ pipeline:
 
 model:
   sh_degree: 3
-  model_dir: "../nerf/datasets/scannet_gaussians/train"
+  model_dir: "/PATH/TO/YOUR/OWN"
   dynamic: False
   load_iteration: 10000
   device: "cuda:0"
+  pretrained_weights_path:
+    - "./weights/openseg_exported_clip"
+    - "ViT-L/14@336px"
 
 fusion:
-  out_dir: "/mnt/bigai_ml/guojun"
+  out_dir: "/PATH/TO/YOUR/OWN"
 
 distill:
-  exp_name: openfastsam_resume
+  exp_name: openseg_new_12wx5_bs1
   model_3d: MinkUNet34A
   voxel_size: 0.02
   aug: True
-  feature_rotation: False
+  feature_type: all
   lr: 0.001
-  epochs: 50
+  epochs: 100
   loss_type: cosine
   schedule_milestones: [20, 40, 60, 80, 100]
   schedule_gamma: 0.3
   batch_size: 1
   num_workers: 16
-  test_interval: 5
-  save_interval: 5
+  test_interval: 10
+  save_interval: 10

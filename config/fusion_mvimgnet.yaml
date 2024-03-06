@@ -1,5 +1,5 @@
 scene:
-  scene_path: "/home/guojun/winshare/nerf/datasets/mvimgnet/"
+  scene_path: "/PATH/TO/YOUR/OWN"
   dataset_name: "scannet_20"
   test_cameras: False
   colmap_images: "images"
@@ -16,30 +16,25 @@ pipeline:
 
 model:
   sh_degree: 3
-  model_dir: "/media/guojun/2A2286A822867899/mvimgnet_gaussians/"
+  model_dir: "/PATH/TO/YOUR/OWN"
   dynamic: False
   load_iteration: -1
   device: "cuda:0"
+  pretrained_weights_path:
+    - "./weights/vlpart/swinbase_part_0a0000.pth"
+    - "./weights/vlpart/sam_vit_h_4b8939.pth"
+    - "ViT-L/14@336px"
 
 fusion:
   img_dim: [540, 960]
   num_workers: 8
   use_sam_mask: False
-  model_2d: vlpart # choose from openseg, groundingsam, vlpart
+  model_2d: openseg # choose from openseg, samclip, vlpart
   depth: render
   depth_scale: 1000.0
-  visibility_threshold: 0.25
+  visibility_threshold: 0.02
   outlier_threshold: -2.0
   cut_boundary: 10
-  n_split_points: 50000
-  num_rand_file_per_scene: 5
-  out_dir: "/media/guojun/2A2286A822867899/mvimgnet_fusion_classname/"
-
-render:
-  fusion_dir: "./fusion/0.pt"
-  view_scale: 1
-
-# distill:
-#   model_3d: MinkUNet34A
-#   model_dir: "./results_distill/fusion80000"
-#   voxel_size: 0.2
+  n_split_points: 99999999 #50000
+  num_rand_file_per_scene: 1 #5
+  out_dir: "/PATH/TO/YOUR/OWN"

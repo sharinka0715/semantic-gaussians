@@ -1,5 +1,6 @@
 import os
 import random
+import json
 import torch
 import imageio
 import warnings
@@ -11,7 +12,7 @@ from omegaconf import OmegaConf
 import skimage.transform as sktf
 from torch.utils.data import DataLoader, random_split
 
-from model import GaussianModel, render, render_sem
+from model import GaussianModel, render, render_chn
 from scene import Scene
 from utils.system_utils import searchForMaxIteration, set_seed
 from model.render_utils import get_text_features, render_palette
@@ -59,8 +60,8 @@ def fuse_one_scene(config, model_2d):
     with torch.no_grad():
         vis_id = torch.zeros((gaussians._xyz.shape[0], len(views)), dtype=int)
         for idx, view in enumerate(tqdm(loader)):
-            if idx % 5 != 0:
-                continue
+            # if idx % 5 != 0:
+            #     continue
             view = view[0]
             view.cuda()
             mapper = PointCloudToImageMapper(
@@ -89,10 +90,14 @@ def fuse_one_scene(config, model_2d):
                     vote = features[:, sam_mask[mi]].mean(dim=1, keepdim=True)
                     features[:, sam_mask[mi]] = vote
 
+            ################################# Save relevancy maps from pretrained models ####################################
+            # pretrained_save_path = os.path.join(config.model.model_dir, "render", "pretrained")
+            # os.makedirs(pretrained_save_path, exist_ok=True)
+
             # palette, text_features, _ = get_text_features(
             #     model_2d,
-            #     config.scene.dataset_name
-            #     # "wall,floor,sofa,table,television,plant,bookshelf,piano,door,speaker,slippers,bottle".split(","),
+            #     model_2d.get_text(model_2d.classes),
+            #     # config.scene.dataset_name,
             # )
             # sim = torch.einsum("cq,qhw->chw", text_features, features.float().cuda())
             # label = sim.argmax(dim=0)
@@ -109,8 +114,9 @@ def fuse_one_scene(config, model_2d):
             #     ).cuda()
             # torchvision.utils.save_image(
             #     new_3d.permute(2, 0, 1),
-            #     "semantic/{0:05d}.png".format(idx),
+            #     "{}/{}.jpg".format(pretrained_save_path, views.camera_info[idx].image_name),
             # )
+            #################################################################################################################
 
             if config.fusion.depth == "image":
                 depth_path = os.path.join(config.scene.scene_path, "depth", view.image_name + ".png")
@@ -148,18 +154,6 @@ def fuse_one_scene(config, model_2d):
             features_mapping = features[:, mapping[:, 1], mapping[:, 2]]
             features_mapping = features_mapping.permute(1, 0).cuda()
 
-            # cs = torch.nn.functional.cosine_similarity(gaussians._features_semantic, features_mapping, dim=-1).cpu()
-
-            # mask_zero = (mask != 0) & (gaussians._times[:, 0].cpu() == 0)
-            # gaussians._features_semantic[mask_zero] += features_mapping[mask_zero]
-            # gaussians._times[mask_zero] += 1
-
-            # mask_one = (mask != 0) & (gaussians._times[:, 0].cpu() != 0)  # & (cs >= config.fusion.outlier_threshold)
-            # gaussians._times[mask_one] += 1
-            # gaussians._features_semantic[mask_one] += (
-            #     features_mapping[mask_one] - gaussians._features_semantic[mask_one]
-            # ) / gaussians._times[mask_one]
-
             mask_k = mask != 0
             gaussians._times[mask_k] += 1
             gaussians._features_semantic[mask_k] += features_mapping[mask_k]
@@ -168,22 +162,12 @@ def fuse_one_scene(config, model_2d):
         gaussians._features_semantic /= gaussians._times
         point_ids = torch.unique(vis_id.nonzero(as_tuple=False)[:, 0])
 
-        # palette, text_features, _ = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
+        ################################ Save relevancy maps from projected gaussians #################################
+        # relevancy_save_path = os.path.join(config.model.model_dir, "render", "relevancy")
+        # os.makedirs(relevancy_save_path, exist_ok=True)
         # palette, text_features, _ = get_text_features(
         #     model_2d,
-        #     [
-        #         "wall",
-        #         "floor",
-        #         "table",
-        #         "sofa",
-        #         "plant",
-        #         "bookshelf",
-        #         "piano",
-        #         "television",
-        #         "speaker",
-        #         "bottle",
-        #         "slippers",
-        #     ],
+        #     model_2d.get_text(model_2d.classes),
         # )
         # sim = torch.einsum("cq,dq->dc", text_features, gaussians._features_semantic)
         # label = sim.argmax(dim=1)
@@ -199,12 +183,6 @@ def fuse_one_scene(config, model_2d):
         #         ]
         #     ).cuda()
 
-        # from utils.sh_utils import RGB2SH
-
-        # bg_color = [1, 1, 1] if config.scene.white_background else [0, 0, 0]
-        # background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-        # gaussians._features_dc[:, 0] = RGB2SH(new_3d)
-        # gaussians._features_rest[:] = 0
         # for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         #     view.cuda()
         #     rendering = render(
@@ -213,34 +191,48 @@ def fuse_one_scene(config, model_2d):
         #         config.pipeline,
         #         background,
         #         override_shape=config.fusion.img_dim,
+        #         override_color=new_3d,
         #     )["render"]
-        #     torchvision.utils.save_image(rendering, os.path.join("semantic", "{0:05d}".format(idx) + ".png"))
-        # exit()
+        #     torchvision.utils.save_image(
+        #         rendering,
+        #         os.path.join(relevancy_save_path, views.camera_info[idx].image_name + ".jpg"),
+        #     )
+        #################################################################################################################
 
+        ################################ Save semantic maps from projected gaussians #################################
+        # semantic_save_path = os.path.join(config.model.model_dir, "render", "semantic")
+        # os.makedirs(semantic_save_path, exist_ok=True)
         # palette, text_features, _ = get_text_features(
         #     model_2d,
-        #     [
-        #         "a guitar headstock",
-        #         "a guitar fingerboard",
-        #         "a guitar hole",
-        #         "a guitar body",
-        #         "a guitar bridge",
-        #     ],
-        # )  # dataset_name=config.scene.dataset_name)
-        # for idx, view in enumerate(tqdm(views)):
-        #     rendering = render_sem(
-        #         view,
-        #         gaussians,
-        #         config.pipeline,
-        #         background,
-        #         override_color=gaussians._features_semantic,
-        #         override_shape=config.fusion.img_dim,
-        #     )["render"]
-        #     rendering = rendering / (rendering.norm(dim=0, keepdim=True) + 1e-8)
-        #     sim = torch.einsum("cq,qhw->chw", text_features, rendering)
-        #     label = sim.argmax(dim=0).cpu()
-        #     sem = render_palette(label, palette)
-        #     torchvision.utils.save_image(sem, os.path.join("semantic", "{0:05d}".format(idx) + ".png"))
+        #     model_2d.get_text(model_2d.classes),
+        # )
+        # sim = torch.einsum("cq,dq->dc", text_features.float(), gaussians._features_semantic)
+        # label_soft = sim.softmax(dim=1)
+        # label_hard = torch.nn.functional.one_hot(sim.argmax(dim=1), num_classes=label_soft.shape[1]).float()
+
+        # for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+        #     view.cuda()
+        #     label = (
+        #         render_chn(
+        #             view,
+        #             gaussians,
+        #             config.pipeline,
+        #             background,
+        #             override_shape=config.fusion.img_dim,
+        #             num_channels=label_soft.shape[1],
+        #             override_color=label_hard,
+        #         )["render"]
+        #         .argmax(dim=0)
+        #         .cpu()
+        #     )
+
+        #     rendering = render_palette(label, palette)
+        #     torchvision.utils.save_image(
+        #         rendering,
+        #         os.path.join(semantic_save_path, views.camera_info[idx].image_name + ".jpg"),
+        #     )
+
+        #################################################################################################################
         # exit()
 
     # save fused features
@@ -267,14 +259,16 @@ def fuse_one_scene(config, model_2d):
                 "feat": gaussians._features_semantic[mask_entire].cpu().half(),
                 "mask_full": mask_entire,
             },
-            os.path.join(config.fusion.out_dir + "/%d/%d.pt" % (config.model.dynamic_t, n))
-            if config.model.dynamic
-            else os.path.join(config.fusion.out_dir + "/%d.pt" % (n)),
+            (
+                os.path.join(config.fusion.out_dir + "/%d/%d.pt" % (config.model.dynamic_t, n))
+                if config.model.dynamic
+                else os.path.join(config.fusion.out_dir + "/%d.pt" % (n))
+            ),
         )
 
 
 if __name__ == "__main__":
-    config = OmegaConf.load("./config/fusion_scannet.yaml")
+    config = OmegaConf.load("./config/fusion_mipnerf360.yaml")
     override_config = OmegaConf.from_cli()
     config = OmegaConf.merge(config, override_config)
     print(OmegaConf.to_yaml(config))
@@ -286,32 +280,10 @@ if __name__ == "__main__":
         from model.openseg_predictor import OpenSeg
 
         model_2d = OpenSeg("./weights/openseg_exported_clip", "ViT-L/14@336px")
-    elif model_2d_name == "opensam":
-        from model.opensam_predictor import OpenSAM
-
-        model_2d = OpenSAM(
-            "./weights/openseg_exported_clip", "./weights/groundingsam/sam_vit_h_4b8939.pth", "ViT-L/14@336px"
-        )
-    elif model_2d_name == "openfastsam":
-        from model.openfastsam_predictor import OpenFastSAM
-
-        model_2d = OpenFastSAM("./weights/openseg_exported_clip", "./weights/fastsam/FastSAM-x.pt", "ViT-L/14@336px")
     elif model_2d_name == "samclip":
         from model.samclip_predictor import SAMCLIP
 
         model_2d = SAMCLIP("./weights/groundingsam/sam_vit_h_4b8939.pth", "ViT-L/14@336px")
-    elif model_2d_name == "fastsamclip":
-        from model.fastsamclip_predictor import FastSAMCLIP
-
-        model_2d = FastSAMCLIP("./weights/fastsam/FastSAM-x.pt", "ViT-L/14@336px")
-    elif model_2d_name == "groundingsam":
-        from model.groundingsam_predictor import GroundingSAM
-
-        model_2d = GroundingSAM(
-            "./weights/groundingsam/groundingdino_swint_ogc.pth",
-            "./weights/groundingsam/sam_vit_h_4b8939.pth",
-            "ViT-L/14@336px",
-        )
     elif model_2d_name == "vlpart":
         from model.vlpart_predictor import VLPart
 
@@ -320,60 +292,31 @@ if __name__ == "__main__":
             "./weights/vlpart/sam_vit_h_4b8939.pth",
             "ViT-L/14@336px",
         )
-    elif model_2d_name == "fastvlpart":
-        from model.fastvlpart_predictor import FastVLPart
-
-        model_2d = FastVLPart(
-            "./weights/vlpart/swinbase_part_0a0000.pth",
-            "./weights/fastsam/FastSAM-x.pt",
-            "ViT-L/14@336px",
-        )
 
     scenes = os.listdir(config.model.model_dir)
     scenes.sort()
 
-    # fuse_one_scene(config, model_2d)
-    # exit()
+    fuse_one_scene(config, model_2d)
 
-    # with open("subset.txt", "r") as fp:
-    #     subset_scenes = [e.strip() for e in fp.readlines()]
+    # for idx, scene in enumerate(tqdm(scenes)):
+    #     if config.model.dynamic:
+    #         T = len(os.listdir(os.path.join(config.scene.scene_path, scene)))
+    #         for t in tqdm(range(T)):
+    #             model_dir = os.path.join(config.model.model_dir, scene)
+    #             scene_path = os.path.join(config.scene.scene_path, scene, str(t))
+    #             out_dir = os.path.join(config.fusion.out_dir, scene)
+    #             print(scene_path)
 
-    for idx, scene in enumerate(tqdm(scenes)):
-        if config.model.dynamic:
-            T = len(os.listdir(os.path.join(config.scene.scene_path, scene)))
-            for t in tqdm(range(T)):
-                model_dir = os.path.join(config.model.model_dir, scene)
-                scene_path = os.path.join(config.scene.scene_path, scene, str(t))
-                out_dir = os.path.join(config.fusion.out_dir, scene)
-                print(scene_path)
-
-                scene_config = deepcopy(config)
-                scene_config.scene.scene_path = scene_path
-                scene_config.model.model_dir = model_dir
-                scene_config.model.dynamic_t = t
-                scene_config.fusion.out_dir = out_dir
-                fuse_one_scene(scene_config, model_2d)
-        else:
-            model_dir = os.path.join(config.model.model_dir, scene)
-            scene_path = os.path.join(config.scene.scene_path, scene)
-            out_dir = os.path.join(config.fusion.out_dir, scene)
-
-            scene_config = deepcopy(config)
-            scene_config.scene.scene_path = scene_path
-            scene_config.model.model_dir = model_dir
-            scene_config.fusion.out_dir = out_dir
-            fuse_one_scene(scene_config, model_2d)
-
-    # with open("mvimgnet_cls.txt", "r") as fp:
-    #     cls_dict = {e.strip().split(",")[0]: e.strip().split(",")[1] for e in fp.readlines()}
-
-    # for cls in cls_dict:
-    #     model_2d.set_predefined_cls(cls_dict[cls])
-    #     scenes = os.listdir(os.path.join(config.model.model_dir, cls))
-    #     for scene in tqdm(scenes):
-    #         model_dir = os.path.join(config.model.model_dir, cls, scene)
-    #         scene_path = os.path.join(config.scene.scene_path, cls, scene)
-    #         out_dir = os.path.join(config.fusion.out_dir, cls, scene)
+    #             scene_config = deepcopy(config)
+    #             scene_config.scene.scene_path = scene_path
+    #             scene_config.model.model_dir = model_dir
+    #             scene_config.model.dynamic_t = t
+    #             scene_config.fusion.out_dir = out_dir
+    #             fuse_one_scene(scene_config, model_2d)
+    #     else:
+    #         model_dir = os.path.join(config.model.model_dir, scene)
+    #         scene_path = os.path.join(config.scene.scene_path, scene)
+    #         out_dir = os.path.join(config.fusion.out_dir, scene)
 
     #         scene_config = deepcopy(config)
     #         scene_config.scene.scene_path = scene_path

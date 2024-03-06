@@ -20,6 +20,7 @@ from scene import Scene
 from utils.system_utils import searchForMaxIteration, set_seed
 from utils.graphics_utils import fov2focal
 from utils.camera_utils import get_camera_viser
+from utils.sh_utils import RGB2SH, SH2RGB
 from dataset.scannet.scannet_constants import SCANNET_COLOR_MAP_20, SCANNET_VALID_CLASS_IDS_20
 
 
@@ -27,11 +28,16 @@ def to_hex(color):
     return "{:02x}{:02x}{:02x}".format(int(color[0]), int(color[1]), int(color[2]))
 
 
+def get_text(vocabulary, prefix_prompt="a "):
+    texts = [prefix_prompt + x.lower().replace(":", " ").replace("_", " ") for x in vocabulary]
+    return texts
+
+
 def render_set(config):
     with torch.no_grad():
         scene_config = deepcopy(config)
-        # if config.model.dynamic:
-        #     scene_config.scene.scene_path = os.path.join(config.scene.scene_path, "0")
+        if config.model.dynamic:
+            scene_config.scene.scene_path = os.path.join(config.scene.scene_path, "0")
         scene = Scene(scene_config.scene)
         gaussians = GaussianModel(config.model.sh_degree)
 
@@ -56,15 +62,14 @@ def render_set(config):
             raise NotImplementedError
 
         server = viser.ViserServer()
-        server.world_axes.visible = True
+        server.world_axes.visible = False
         need_update = False
         need_up_compute = False
         need_color_compute = True
-        need_scale_compute = True
         tab_group = server.add_gui_tab_group()
 
         with tab_group.add_tab("Settings", viser.Icon.SETTINGS):
-            gui_render_mode = server.add_gui_button_group("Render mode", ("RGB", "Depth", "Semantic"))
+            gui_render_mode = server.add_gui_button_group("Render mode", ("RGB", "Depth", "Semantic", "Relevancy"))
             render_mode = "RGB"
             gui_near_slider = server.add_gui_slider("Depth near", min=0, max=3, step=0.2, initial_value=1.5)
             gui_far_slider = server.add_gui_slider("Depth far", min=6, max=20, step=0.5, initial_value=6)
@@ -74,10 +79,13 @@ def render_set(config):
 
             gui_prompt_input = server.add_gui_text(
                 "Text prompt (divided by comma)",
-                "wall,floor,cabinet,bed,chair,sofa,table,door,window,bookshelf,picture,counter,desk,curtain,refrigerator,shower curtain,toilet,sink,bathtub",
-                # "wall,floor,sofa,table,television,plant,bookshelf,piano,door,speaker,slippers,bottle",
+                # "wall,floor,cabinet,bed,chair,sofa,table,door,window,bookshelf,picture,counter,desk,curtain,refrigerator,shower curtain,toilet,sink,bathtub",
+                "wall,floor,sofa,table,television,plant,bookshelf,piano,door,speaker,slippers,bottle",
             )
-            gui_delete_input = server.add_gui_text("Delete prompt (divided by comma)", "")
+
+            gui_edit_mode = server.add_gui_button_group("Edit mode", ("Remove", "Color", "Size", "Move"))
+            edit_mode = "Remove"
+            gui_edit_input = server.add_gui_text("Edit prompt (divided by comma)", "")
             gui_preserve_input = server.add_gui_text("Preserve prompt (divided by comma)", "")
             gui_prompt_button = server.add_gui_button("Apply text prompt")
 
@@ -88,6 +96,8 @@ def render_set(config):
         features, mask = fusion["feat"].float().cuda(), fusion["mask_full"].cuda()
         original_opacity = gaussians._opacity.detach().clone()
         original_scale = gaussians._scaling.detach().clone()
+        original_color = gaussians._features_dc.detach().clone()
+        original_coord = gaussians._xyz.detach().clone()
 
         features_save = torch.zeros((mask.shape[0], 768)).float().cuda()
         features_save[mask] = features
@@ -109,6 +119,13 @@ def render_set(config):
             nonlocal render_mode
             render_mode = gui_render_mode.value
 
+        @gui_edit_mode.on_click
+        def _(_) -> None:
+            nonlocal edit_mode
+            nonlocal need_color_compute
+            edit_mode = gui_edit_mode.value
+            need_color_compute = True
+
         @gui_prompt_button.on_click
         def _(_) -> None:
             nonlocal need_color_compute
@@ -116,8 +133,8 @@ def render_set(config):
 
         @gui_scale_slider.on_update
         def _(_) -> None:
-            nonlocal need_scale_compute
-            need_scale_compute = True
+            nonlocal need_color_compute
+            need_color_compute = True
 
         @server.on_client_connect
         def _(client: viser.ClientHandle) -> None:
@@ -142,7 +159,7 @@ def render_set(config):
                 passed_frames = passed_time * config.render.dynamic_fps
                 t = int(passed_frames % num_timesteps)
             if need_color_compute:
-                labelset = ["other"] + gui_prompt_input.value.split(",")
+                labelset = ["other"] + get_text(gui_prompt_input.value.split(","))
                 text_features = text_model.extract_text_feature(labelset).float()
                 sim = torch.einsum("cq,dq->dc", text_features, features)
                 label_soft = sim.softmax(dim=1)
@@ -150,10 +167,10 @@ def render_set(config):
                 soft_save = torch.zeros((mask.shape[0], label_soft.shape[1])).float().cuda()
                 soft_save[mask] = label_hard
                 # sim[sim < 0] = -2
-                # label = sim.argmax(dim=1)
-                # colors = colormap_cuda[label] / 255
-                # color_save = torch.zeros((mask.shape[0], 3)).float().cuda()
-                # color_save[mask] = colors
+                label = sim.argmax(dim=1)
+                colors = colormap_cuda[label] / 255
+                color_save = torch.zeros((mask.shape[0], 3)).float().cuda()
+                color_save[mask] = colors
 
                 color_mapping = list(zip(labelset, colormap_hex))
                 content_head = "| | |\n|:-:|:-|"
@@ -165,24 +182,49 @@ def render_set(config):
                 )
                 gui_markdown.content = content_head + content_body
 
-                if gui_delete_input.value != "":
-                    len_delete = len(gui_delete_input.value.split(","))
-                    delete_features = text_model.extract_text_feature(
-                        ["other"] + gui_delete_input.value.split(",") + gui_preserve_input.value.split(",")
+                if gui_edit_input.value != "":
+                    len_edit = len(gui_edit_input.value.split(","))
+                    edit_features = text_model.extract_text_feature(
+                        ["other"] + gui_edit_input.value.split(",") + gui_preserve_input.value.split(",")
                     ).float()
-                    sim = torch.einsum("cq,dq->dc", delete_features, features)
+                    sim = torch.einsum("cq,dq->dc", edit_features, features)
                     sim[sim < 0] = -2
                     label = sim.argmax(dim=1)
                     gaussians._opacity[:] = original_opacity
-                    tmp = gaussians._opacity[mask]
-                    tmp[(label > 0) * (label <= len_delete)] = -9999
-                    gaussians._opacity[mask] = tmp
+                    gaussians._features_dc[:] = original_color
+                    gaussians._scaling[:] = original_scale
+                    gaussians._xyz[:] = original_coord
+
+                    edit_mask = (label > 0) * (label <= len_edit)
+                    if edit_mode == "Remove":
+                        tmp = gaussians._opacity[mask]
+                        tmp[edit_mask] = -9999
+                        gaussians._opacity[mask] = tmp
+                    elif edit_mode == "Color":
+                        tmp = gaussians._features_dc[mask]
+                        tmp_rgb = SH2RGB(tmp[edit_mask])  # [n_points, 1, 3]
+                        tmp_rgb = 1 - tmp_rgb
+                        tmp_rgb = torch.clamp(tmp_rgb, 0, 1)
+                        tmp[edit_mask] = RGB2SH(tmp_rgb)
+                        gaussians._features_dc[mask] = tmp
+                    elif edit_mode == "Size":
+                        tmp = gaussians._scaling[mask]
+                        tmp[edit_mask] *= 2
+                        gaussians._scaling[mask] = tmp
+                        tmp = gaussians._xyz[mask]
+                        tmp[edit_mask] *= 2
+                        gaussians._xyz[mask] = tmp
+                    elif edit_mode == "Move":
+                        tmp = gaussians._xyz[mask]
+                        tmp[edit_mask] += 1
+                        gaussians._xyz[mask] = tmp
                 else:
                     gaussians._opacity[:] = original_opacity
+                    gaussians._features_dc[:] = original_color
+                    gaussians._scaling[:] = original_scale
+                    gaussians._xyz[:] = original_coord
+
                 need_color_compute = False
-            # if need_scale_compute:
-            #     gaussians._scaling[:] = original_scale * gui_scale_slider.value
-            #     need_scale_compute = False
             for client in server.get_clients().values():
                 client_info = client.camera
                 w2c_matrix = (
@@ -227,7 +269,7 @@ def render_set(config):
                         255,
                     )
                     rendering = cv2.cvtColor(rendering.astype(np.uint8), cv2.COLOR_GRAY2RGB)
-                else:  # semantic
+                elif render_mode == "Semantic":
                     output = render_chn(
                         new_camera,
                         gaussians,
@@ -248,11 +290,24 @@ def render_set(config):
                     label = sim.argmax(dim=0).cpu()
                     sem = render_palette(label, colormap_cuda.reshape(-1))
                     rendering = sem.cpu().numpy().transpose(1, 2, 0)
+                else:  # relevancy
+                    output = render(
+                        new_camera,
+                        gaussians,
+                        config.pipeline,
+                        background,
+                        scaling_modifier=gui_scale_slider.value,
+                        # override_color=features_save,
+                        override_color=color_save,
+                        # override_color=features_save,
+                        foreground=gaussians.is_fg if gui_background_checkbox.value else None,
+                    )
+                    rendering = output["render"].cpu().numpy().transpose(1, 2, 0)
                 client.set_background_image(rendering)
 
 
 if __name__ == "__main__":
-    config = OmegaConf.load("./config/fusion_scannet.yaml")
+    config = OmegaConf.load("./config/fusion_mipnerf360.yaml")
     override_config = OmegaConf.from_cli()
     config = OmegaConf.merge(config, override_config)
     print(OmegaConf.to_yaml(config))

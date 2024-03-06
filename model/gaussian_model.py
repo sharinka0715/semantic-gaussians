@@ -397,7 +397,7 @@ class GaussianModel:
 
         return xyz, opacities, features_dc
 
-    def get_locs_and_features(self, feature_rotation=True):
+    def get_locs_and_features(self, feature_type="all"):
         locs = self._xyz.detach().clone().cpu().numpy()
         opacities = self._opacity.detach().clone().cpu().numpy()
         features_dc = self._features_dc.detach().clone().cpu().numpy()
@@ -405,14 +405,14 @@ class GaussianModel:
         scale = self._scaling.detach().clone().cpu().numpy()
         rot = self._rotation.detach().clone().cpu().numpy()
 
-        if feature_rotation:
+        if feature_type == "all":
             features = np.concatenate(
                 [t.reshape(locs.shape[0], -1) for t in [opacities, features_dc, features_rest, scale, rot]],
                 axis=-1,
             )
-        else:
+        elif feature_type == "color":
             features = np.concatenate(
-                [t.reshape(locs.shape[0], -1) for t in [opacities, features_dc, features_rest, scale]],
+                [t.reshape(locs.shape[0], -1) for t in [features_dc, features_rest]],
                 axis=-1,
             )
         return locs, features

@@ -31,6 +31,20 @@ class OpenSeg:
             print("Loading CLIP {} model...".format(text_model_name))
             self.text_model, _ = clip.load(text_model_name, device="cuda", jit=False)
 
+    def set_predefined_cls(self, cls):
+        # self.classes = ".".join([e for e in (list(PASCAL_PART_VOCAB) + list(LVIS_PACO_VOCAB)) if cls in e])
+        self.classes = ".".join(cls)
+        print(self.classes)
+
+    def set_predefined_part(self, cls, parts):
+        self.classes = ".".join([f"{cls}:{e}" for e in parts])
+        print(self.classes)
+
+    def get_text(self, vocabulary, prefix_prompt="a "):
+        vocabulary = vocabulary.split(".")
+        texts = [prefix_prompt + x.lower().replace(":", " ").replace("_", " ") for x in vocabulary]
+        return texts
+
     def extract_image_feature(self, img_dir, img_size=None, regional_pool=True):
         """Extract per-pixel OpenSeg features.
         Only receives image path as input.

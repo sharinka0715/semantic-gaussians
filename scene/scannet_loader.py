@@ -48,21 +48,6 @@ def readScanNetInfo(path, white_background, eval, llffhold=8, extensions=[".png"
         image_path = img
         image_name = Path(img).stem
 
-        # bg = np.array([1, 1, 1]) if white_background else np.array([0, 0, 0])
-
-        # image = Image.open(image_path)
-
-        # im_data = np.array(image.convert("RGBA"))
-
-        # norm_data = im_data / 255.0
-        # arr = norm_data[:, :, :3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
-        # image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
-
-        # fovy = focal2fov(fy, image.size[1])
-        # fovx = focal2fov(fx, image.size[0])
-        # FovY = fovy
-        # FovX = fovx
-
         cam_infos.append(
             CameraInfo(
                 uid=idx,

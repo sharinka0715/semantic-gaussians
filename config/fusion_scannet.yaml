@@ -1,5 +1,5 @@
 scene:
-  scene_path: /home/guojun/winshare/nerf/datasets/scannet_half/val/
+  scene_path: "/PATH/TO/YOUR/OWN"
   dataset_name: "scannet_20"
   test_cameras: False
   colmap_images: "images"
@@ -16,29 +16,23 @@ pipeline:
 
 model:
   sh_degree: 3
-  model_dir: /home/guojun/winshare/nerf/datasets/scannet_gaussians/val/
+  model_dir: "/PATH/TO/YOUR/OWN"
   dynamic: False
   load_iteration: -1
   device: "cuda:0"
+  pretrained_weights_path:
+    - "./weights/openseg_exported_clip"
+    - "ViT-L/14@336px"
 
 fusion:
   img_dim: [648, 484]
   num_workers: 8
-  model_2d: samclip # choose from openseg, groundingsam, vlpart
+  model_2d: openseg # choose from openseg, samclip, vlpart
   depth: render # choose from image, render, surface, none
   depth_scale: 1000.0
   use_sam_mask: False
   visibility_threshold: 0.05
   cut_boundary: 10
-  n_split_points: 99999999 #80000
-  num_rand_file_per_scene: 1 #10
-  out_dir: "/media/guojun/2A2286A822867899/scannet_fusion_val_samclip"
-
-# render:
-#   fusion_dir: "/media/guojun/2A2286A822867899/scannet_fusion_val_openseg/scene0011_00/0.pt"
-#   view_scale: 1
-
-# distill:
-#   model_3d: MinkUNet34A
-#   model_dir: "./results_distill/3heads"
-#   voxel_size: 0.02
+  n_split_points: 80000
+  num_rand_file_per_scene: 5
+  out_dir: "/PATH/TO/YOUR/OWN"

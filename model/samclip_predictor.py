@@ -49,10 +49,10 @@ class SAMCLIP:
             score = mask["stability_score"] * mask["predicted_iou"]
             x1, y1 = int(bbox[0]), int(bbox[1])
             x2, y2 = int(bbox[0] + bbox[2]), int(bbox[1] + bbox[3])
-            h_thresh = int(image.shape[0] * 0.1)
-            w_thresh = int(image.shape[1] * 0.1)
-            if x2 < w_thresh or x1 > image.shape[1] - w_thresh or y2 < h_thresh or y1 > image.shape[0] - h_thresh:
-                continue
+            # h_thresh = int(image.shape[0] * 0.1)
+            # w_thresh = int(image.shape[1] * 0.1)
+            # if x2 < w_thresh or x1 > image.shape[1] - w_thresh or y2 < h_thresh or y1 > image.shape[0] - h_thresh:
+            #     continue
 
             crop = (image * seg_mask[:, :, np.newaxis])[y1:y2, x1:x2]
             h, w, _ = crop.shape
@@ -66,6 +66,11 @@ class SAMCLIP:
             pad_imgs.append(cv2.resize(pad, (336, 336)))
             segs.append(seg_mask)
             scores.append(score)
+
+        if len(pad_imgs) == 0:
+            print("Error: no mask detected!")
+            return torch.zeros((768, image.shape[0], image.shape[1]), dtype=torch.half)
+
         pad_imgs = np.stack(pad_imgs, axis=0)  # B, H, W, 3
         pad_imgs = torch.from_numpy(pad_imgs.astype("float32")).permute(0, 3, 1, 2) / 255.0
         pad_imgs = torchvision.transforms.Normalize(

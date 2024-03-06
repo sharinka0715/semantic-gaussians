@@ -38,6 +38,8 @@ def get_text_features(model_2d, dataset_name="scannet_20"):
     scannet_palette = [torch.tensor(color_map[0])] + scannet_palette
     mapping = [0] + mapping
 
+    # scannet_palette[9] = scannet_palette[8]
+
     palette = torch.cat(scannet_palette).cuda()
     text_features = model_2d.extract_text_feature(labelset).float()
 

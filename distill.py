@@ -59,10 +59,10 @@ def init_dir(config):
 
 
 def distill(config):
-    if config.distill.feature_rotation:
+    if config.distill.feature_type == "all":
         model_3d = mink_unet(in_channels=56, out_channels=768, D=3, arch=config.distill.model_3d).cuda()
-    else:
-        model_3d = mink_unet(in_channels=52, out_channels=768, D=3, arch=config.distill.model_3d).cuda()
+    elif config.distill.feature_type == "color":
+        model_3d = mink_unet(in_channels=48, out_channels=768, D=3, arch=config.distill.model_3d).cuda()
     model_2d = OpenSeg(None, "ViT-L/14@336px")
 
     writer = init_dir(config)
@@ -79,7 +79,7 @@ def distill(config):
             config.fusion.out_dir,
             config.distill.voxel_size,
             config.distill.aug,
-            config.distill.feature_rotation,
+            config.distill.feature_type,
         )
     else:
         dataset = FeatureDataset(
@@ -88,7 +88,7 @@ def distill(config):
             config.model.load_iteration,
             config.distill.voxel_size,
             config.distill.aug,
-            config.distill.feature_rotation,
+            config.distill.feature_type,
         )
 
     loader = DataLoader(
@@ -188,7 +188,7 @@ def eval(config, model_3d, model_2d, voxelizer, iter):
             )
         )
 
-    locs, features = gaussians.get_locs_and_features(config.distill.feature_rotation)
+    locs, features = gaussians.get_locs_and_features(config.distill.feature_type)
     locs, features, _, _, vox_ind = voxelizer.voxelize(locs, features, None, return_ind=True)
     locs = torch.from_numpy(locs).int()
     locs = torch.cat([torch.ones(locs.shape[0], 1, dtype=torch.int), locs], dim=1)

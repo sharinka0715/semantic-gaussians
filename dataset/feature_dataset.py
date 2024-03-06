@@ -22,20 +22,15 @@ class FeatureDataset(Dataset):
     ROTATION_AXIS = "z"
 
     def __init__(
-        self, gaussians_dir, point_dir, gaussian_iterations=30000, voxel_size=0.02, aug=False, feature_rotation=True
+        self, gaussians_dir, point_dir, gaussian_iterations=30000, voxel_size=0.02, aug=False, feature_type="all"
     ):
         self.aug = aug
-        self.feature_rotation = feature_rotation
+        self.feature_type = feature_type
         self.scenes = os.listdir(gaussians_dir)
-
-        # with open("subset.txt", "r") as fp:
-        #     self.scenes = [e.strip() for e in fp.readlines()]
         self.scenes.sort()
 
         self.data = []
         for scene in self.scenes:
-            # for head_id, head in enumerate(["openfastsam"]):
-            # features = os.listdir(os.path.join(point_dir, f"scannet_fusion_{head}_8wx10", scene))
             features = os.listdir(os.path.join(point_dir, scene))
             features.sort()
             for feature in features:
@@ -64,7 +59,7 @@ class FeatureDataset(Dataset):
     def __getitem__(self, index):
         with torch.no_grad():
             ply_path, feature_path, head_id = self.data[index]
-            locs, features = load_gaussian_ply(ply_path, self.feature_rotation)
+            locs, features = load_gaussian_ply(ply_path, self.feature_type)
             gt = torch.load(feature_path)
             features_gt, mask_chunk = gt["feat"], gt["mask_full"]
 
@@ -117,10 +112,10 @@ class MVImgNetDataset(FeatureDataset):
     ELASTIC_DISTORT_PARAMS = ((0.2, 0.4), (0.8, 1.6))
 
     def __init__(
-        self, gaussians_dir, point_dir, gaussian_iterations=10000, voxel_size=0.2, aug=False, feature_rotation=True
+        self, gaussians_dir, point_dir, gaussian_iterations=10000, voxel_size=0.2, aug=False, feature_type="all"
     ):
         self.aug = aug
-        self.feature_rotation = feature_rotation
+        self.feature_type = feature_type
         self.classes = os.listdir(gaussians_dir)
         self.classes.sort()
 
@@ -158,7 +153,7 @@ class MVImgNetDataset(FeatureDataset):
     def __getitem__(self, index):
         with torch.no_grad():
             ply_path, feature_path, head_id = self.data[index]
-            locs, features = load_gaussian_ply(ply_path, self.feature_rotation)
+            locs, features = load_gaussian_ply(ply_path, self.feature_type)
             gt = torch.load(feature_path)
             features_gt, mask_chunk = gt["feat"], gt["mask_full"]
             # normalization

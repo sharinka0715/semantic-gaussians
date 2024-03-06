@@ -1,4 +1,5 @@
 """IoU"""
+
 import numpy as np
 from dataset.label_constant import *
 from dataset.scannet.scannet_constants import SCANNET_CLASS_LABELS_20, SCANNET_CLASS_LABELS_200
@@ -174,21 +175,21 @@ def evaluate_confusion(confusion, stdout=False, dataset="scannet_20"):
                 continue
         print("Mean IoU", mean_iou)
         print("Mean Acc", mean_acc)
-    with open("eval_result.log", "a") as fp:
-        fp.write("classes,IoU\n")
-        for i in range(N_CLASSES):
-            label_name = CLASS_LABELS[i]
-            try:
-                fp.write(
-                    "{0:<14s}: {1:>5.3f}  ({2:>6d}/{3:<6d})\n".format(
-                        label_name,
-                        class_ious[label_name][0],
-                        class_ious[label_name][1],
-                        class_ious[label_name][2],
-                    )
-                )
-            except:
-                fp.write(label_name + ",error\n")
-        fp.write("mean IoU,{}\n".format(mean_iou))
-        fp.write("mean Acc,{}\n\n".format(mean_acc))
+    # with open("eval_result.log", "a") as fp:
+    #     fp.write("classes,IoU\n")
+    #     for i in range(N_CLASSES):
+    #         label_name = CLASS_LABELS[i]
+    #         try:
+    #             fp.write(
+    #                 "{0:<14s}: {1:>5.3f}  ({2:>6d}/{3:<6d})\n".format(
+    #                     label_name,
+    #                     class_ious[label_name][0],
+    #                     class_ious[label_name][1],
+    #                     class_ious[label_name][2],
+    #                 )
+    #             )
+    #         except:
+    #             fp.write(label_name + ",error\n")
+    #     fp.write("mean IoU,{}\n".format(mean_iou))
+    #     fp.write("mean Acc,{}\n\n".format(mean_acc))
     return mean_iou

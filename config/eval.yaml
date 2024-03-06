@@ -1,6 +1,6 @@
 scene:
   dataset_name: "scannet_20"
-  scene_path: "../nerf/datasets/scannet_half/val"
+  scene_path: "/PATH/TO/YOUR/OWN"
   test_cameras: False
   colmap_images: "images"
   colmap_eval_hold: 8
@@ -16,23 +16,27 @@ pipeline:
 
 model:
   sh_degree: 3
-  model_dir: "../nerf/datasets/scannet_gaussians/val"
+  model_dir: "/PATH/TO/YOUR/OWN"
   load_iteration: 10000
   device: "cuda:0"
+  pretrained_weights_path:
+    - "./weights/openseg_exported_clip"
+    - "ViT-L/14@336px"
 
 fusion:
-  out_dir: "/media/guojun/2A2286A822867899/scannet_fusion_val_openseg"
+  out_dir: "/PATH/TO/YOUR/OWN"
 
 distill:
   model_3d: MinkUNet34A
-  model_dir: "./results_distill/fusion80000"
+  model_dir: "/PATH/TO/YOUR/OWN"
   voxel_size: 0.02
-  iteration: 50
-  feature_rotation: True
+  iteration: 100
+  feature_type: all
 
 eval:
-  model_2d: opensam
+  model_2d: openseg
   width: 648
   height: 484
   pred_on_3d: True
+  feature_fusion: argmax # choose from concat, argmax, mean 
 

@@ -1,0 +1,12 @@
+[submodule "submodules/channel-rasterization/third_party/glm"]
+	path = submodules/channel-rasterization/third_party/glm
+	url = https://github.com/g-truc/glm/
+[submodule "submodules/rgbd-rasterization/third_party/glm"]
+	path = submodules/rgbd-rasterization/third_party/glm
+	url = https://github.com/g-truc/glm/
+[submodule "submodules/rgb-rasterization/third_party/glm"]
+	path = submodules/rgb-rasterization/third_party/glm
+	url = https://github.com/g-truc/glm/
+[submodule "submodules/semantic-rasterization/third_party/glm"]
+	path = submodules/semantic-rasterization/third_party/glm
+	url = https://github.com/g-truc/glm/

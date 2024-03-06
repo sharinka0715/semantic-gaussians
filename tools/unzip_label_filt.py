@@ -3,8 +3,8 @@ import zipfile
 from tqdm import tqdm
 import traceback
 
-LABEL_ROOT = "/home/guojun/winshare/nerf/datasets/scannet_labels/"
-OUT_ROOT = "/home/guojun/winshare/nerf/datasets/scannet_half"
+LABEL_ROOT = "/PATH/TO/YOUR/SCANNET/RAW"
+OUT_ROOT = "/PATH/TO/YOUR/SCANNET/EXTRACTED"
 
 
 for split in ["val"]:
