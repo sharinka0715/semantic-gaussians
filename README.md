@@ -1,6 +1,18 @@
 # Semantic Gaussians: Open-Vocabulary Scene Understanding with 3D Gaussian Splatting
 
-This repository is the official implemetation of the paper "Semantic Gaussians: Open-Vocabulary Scene Understanding with 3D Gaussian Splatting".
+<p align="left">
+    <a href='https://arxiv.org/pdf/2403.15624.pdf'>
+      <img src='https://img.shields.io/badge/Paper-PDF-red?style=plastic&logo=adobeacrobatreader&logoColor=red' alt='Paper PDF'>
+    </a>
+    <a href='https://arxiv.org/abs/2403.15624'>
+      <img src='https://img.shields.io/badge/Paper-arXiv-green?style=plastic&logo=arXiv&logoColor=green' alt='Paper arXiv'>
+    </a>
+    <a href='https://semantic-gaussians.github.io/'>
+      <img src='https://img.shields.io/badge/Project-Page-blue?style=plastic&logo=Google%20chrome&logoColor=blue' alt='Project Page'>
+    </a>
+</p>
+
+This repository is the official implemetation of the paper "[Semantic Gaussians: Open-Vocabulary Scene Understanding with 3D Gaussian Splatting](https://arxiv.org/abs/2403.15624)".
 
 <div align=center>
 <img src='./assets/teaser.png' width=80%>
@@ -128,3 +140,20 @@ We appreciate the works below as this repository is heavily based on them:
 
 [[Cheems Seminar] Grounded Segment Anything: From Objects to Parts](https://github.com/Cheems-Seminar/grounded-segment-any-parts)
 
+
+## News
+
+- [2024.05] We release our initial version of implemetation.
+
+## Citation
+
+```bibtex
+@misc{guo2024semantic,
+    title={Semantic Gaussians: Open-Vocabulary Scene Understanding with 3D Gaussian Splatting}, 
+    author={Jun Guo and Xiaojian Ma and Yue Fan and Huaping Liu and Qing Li},
+    year={2024},
+    eprint={2403.15624},
+    archivePrefix={arXiv},
+    primaryClass={cs.CV}
+  }
+```
