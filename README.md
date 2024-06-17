@@ -27,6 +27,11 @@ Open-vocabulary 3D scene understanding presents a significant challenge in compu
 This code has been tested on Ubuntu 22.04 and NVIDIA RTX 4090. We recommend to use Linux and an NVIDIA GPU with ≥ 16GB VRAM. This repository may support Windows machines but it was not evaluated. It cannot support MacOS system as it requires CUDA.
 
 ## Install
+
+```bash
+git clone https://github.com/sharinka0715/semantic-gaussians --recursive
+```
+
 1. Create individual virtual environment (or use existing environments with CUDA Development kit and corresponding version of PyTorch)
 ```bash
 conda create -f environment.yaml
