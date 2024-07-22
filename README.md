@@ -28,26 +28,30 @@ This code has been tested on Ubuntu 22.04 and NVIDIA RTX 4090. We recommend to u
 
 ## Install
 
-```bash
-git clone https://github.com/sharinka0715/semantic-gaussians --recursive
-```
+1. Clone our repository (remember to add the `--recursive` argument to clone submodules).
 
-1. Create individual virtual environment (or use existing environments with CUDA Development kit and corresponding version of PyTorch)
-```bash
-conda create -f environment.yaml
-conda activate sega
-```
+    ```bash
+    git clone https://github.com/sharinka0715/semantic-gaussians --recursive
+    cd semantic-gaussians
+    ```
 
-2. Install additional dependencies with pip as many of them need to be compiled.
-```bash
-pip install -r requirements.txt
-```
-3. Compile and install MinkowskiEngine through anaconda, recommending to install through [official instructions](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation)
-```bash
-# Here is an example only for Anaconda, CUDA 11.x
-conda install openblas-devel -c anaconda
-pip install git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps --install-option="--blas_include_dirs=${CONDA_PREFIX}/include" --install-option="--blas=openblas"
-```
+2. Create individual virtual environment (or use existing environments with CUDA Development kit and corresponding version of PyTorch).
+    ```bash
+    conda env create -f environment.yaml
+    conda activate sega
+    ```
+
+3. Install additional dependencies with pip as many of them need to be compiled.
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4. Compile and install MinkowskiEngine through anaconda, recommending to install through [official instructions](https://github.com/NVIDIA/MinkowskiEngine?tab=readme-ov-file#installation).
+    ```bash
+    # Here is an example only for Anaconda, CUDA 11.x
+    conda install openblas-devel -c anaconda
+    pip install git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps --install-option="--blas_include_dirs=${CONDA_PREFIX}/include" --install-option="--blas=openblas"
+    ```
 
 ## Prepare Dataset and Pretrained 2D Models
 
@@ -83,7 +87,7 @@ Blender and COLMAP formats are originally supported by 3D Gaussian Splatting and
 The ScanNet dataset can be extracted by `tools/scannet_sens_reader.py`. You can also use `tools/unzip_lable_filt.py` to extract ground truth semantic labels in ScanNet-20 dataset.
 ```bash
 # An example used for experiments in paper
-python tools/scannet_sens/reader.py --input_path /PATH/TO/YOUR/scene0000_00 --output_path /PATH/TO/YOUR/OUTPUT/scene0000_00 --export_width 648 --export_height 484 --frame_skip 5
+python tools/scannet_sens/reader.py --input_path /PATH/TO/YOUR/scene0000_00 --output_path /PATH/TO/YOUR/OUTPUT/scene0000_00
 ```
 
 ### Datasets Used in Paper
@@ -102,6 +106,7 @@ You should put these downloaded pretrained checkpoints under the `./weight/` fol
 |----|----|----|
 | CLIP | ViT-L/14@336px | Automatically download by `openai/CLIP` |
 | OpenSeg | Default | [Google Drive](https://drive.google.com/file/d/1DgyH-1124Mo8p6IUJ-ikAiwVZDDfteak/view), [Official Repo](https://github.com/tensorflow/tpu/tree/master/models/official/detection/projects/openseg)
+| LSeg | Model for Demo | [Google Drive](https://drive.google.com/file/d/1FTuHY1xPUkM-5gaDtMfgCl3D0gR89WV7/view?usp=sharing), [Official Repo](https://github.com/isl-org/lang-seg)
 | SAM | ViT-H | [Direct Link](https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth), [Official Repo](https://github.com/facebookresearch/segment-anything?tab=readme-ov-file#model-checkpoints)
 | VLPart | Swin-Base | [Direct Link](https://github.com/Cheems-Seminar/grounded-segment-any-parts/releases/download/v1.0/swinbase_part_0a0000.pth), [Grounded Segment Any Parts Repo](https://github.com/Cheems-Seminar/grounded-segment-any-parts?tab=readme-ov-file#model-checkpoints)
 
@@ -127,11 +132,17 @@ This repository has 4 entries to start a program. Every entry has its correspond
 
     This will output 3D semantic network checkpoints in `results_distlll/` folder.
 
-* `evaluate.py`: Evaluate the semantic segmentation performance on ScanNet dataset.
+* `eval_segmentation.py`: Evaluate the semantic segmentation performance on ScanNet dataset.
     
     config: `config/eval.yaml`.
 
     This will print the evaluation results on the screen.
+
+* `view_viser.py`: View the semantic Gaussians. Need 2D projected results (*.pt) and original RGB Gaussians.
+    
+    config: `config/view_scannet.yaml`.
+
+    This will open a web service supported by [viser](https://github.com/nerfstudio-project/viser).
 
 ## Acknowledgements
 
@@ -147,6 +158,8 @@ We appreciate the works below as this repository is heavily based on them:
 
 
 ## News
+
+- [2024.07] We fix some dependency problems in our code. Add LSeg modules.
 
 - [2024.05] We release our initial version of implemetation.
 

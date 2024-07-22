@@ -5,14 +5,12 @@ from torch.utils.data import Dataset
 from scene.blender_loader import readBlenderInfo
 from scene.colmap_loader import readColmapInfo
 from scene.scannet_loader import readScanNetInfo
-from scene.replica_loader import readReplicaInfo
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON, loadCam
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapInfo,
     "Blender": readBlenderInfo,
     "ScanNet": readScanNetInfo,
-    "Replica": readReplicaInfo,
 }
 
 
@@ -60,9 +58,9 @@ class Scene:
         elif os.path.exists(os.path.join(args.scene_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender synthetic data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.scene_path, args.white_background, args.test_cameras)
-        elif os.path.exists(os.path.join(args.scene_path, "traj_w_c.txt")):
-            print("Found traj_w_c.txt file, assuming Replica data set!")
-            scene_info = sceneLoadTypeCallbacks["Replica"](args.scene_path, args.white_background, args.test_cameras)
+        # elif os.path.exists(os.path.join(args.scene_path, "traj_w_c.txt")):
+        #     print("Found traj_w_c.txt file, assuming Replica data set!")
+        #     scene_info = sceneLoadTypeCallbacks["Replica"](args.scene_path, args.white_background, args.test_cameras)
         else:
             assert False, "Could not recognize scene type!"
 

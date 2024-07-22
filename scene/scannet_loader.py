@@ -12,10 +12,8 @@ from utils.dataset_utils import SceneInfo, CameraInfo, getNerfppNorm, storePly, 
 def readScanNetInfo(path, white_background, eval, llffhold=8, extensions=[".png", ".jpg"]):
     path = Path(path)
     image_dir = path / "color"
-    # depth_dir = path / "depth"
     pose_dir = path / "pose"
     image_sorted = list(sorted(image_dir.iterdir(), key=lambda x: int(x.name.split(".")[0])))
-    # depth_sorted = list(sorted(depth_dir.iterdir(), key=lambda x: int(x.name.split(".")[0])))
     pose_sorted = list(sorted(pose_dir.iterdir(), key=lambda x: int(x.name.split(".")[0])))
 
     cam_infos = []
@@ -26,16 +24,13 @@ def readScanNetInfo(path, white_background, eval, llffhold=8, extensions=[".png"
     fovx = focal2fov(K[0, 0], K[0, 2] * 2)
     fovy = focal2fov(K[1, 1], K[1, 2] * 2)
 
-    K[0] = K[0] * (width - 0.5) / (K[0, 2] * 2)
-    K[1] = K[1] * (height - 0.5) / (K[1, 2] * 2)
-
     i = 0
     for img, pose in zip(image_sorted, pose_sorted):
         i += 1
         idx = int(img.name.split(".")[0])
         c2w = np.loadtxt(pose)
         c2w = np.array(c2w).reshape(4, 4).astype(np.float32)
-        # ScanNet pose use COLMAP coordinates (Y down, Z forward), so no need to process
+        # ScanNet pose use COLMAP coordinates (Y down, Z forward), so no need to flip the axis
         # c2w[:3, 1:3] *= -1
         # We cannot accept files directly, as some of the poses are invalid
         if np.isinf(c2w).any():

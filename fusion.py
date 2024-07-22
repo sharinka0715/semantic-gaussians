@@ -1,6 +1,4 @@
 import os
-import random
-import json
 import torch
 import imageio
 import warnings
@@ -10,14 +8,14 @@ from copy import deepcopy
 from tqdm import tqdm
 from omegaconf import OmegaConf
 import skimage.transform as sktf
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 from model import GaussianModel, render, render_chn
 from scene import Scene
 from utils.system_utils import searchForMaxIteration, set_seed
 from model.render_utils import get_text_features, render_palette
-from dataset.label_constant import SCANNET_LABELS_20, SCANNET_COLOR_MAP_20
 from dataset.fusion_utils import PointCloudToImageMapper
+from dataset.scannet.scannet_constants import SCANNET20_CLASS_LABELS
 
 warnings.filterwarnings("ignore")
 
@@ -42,9 +40,9 @@ def fuse_one_scene(config, model_2d):
             )
         )
 
-    gaussians.create_semantic(768)
+    gaussians.create_semantic(model_2d.embedding_dim)
 
-    bg_color = [1] * 768 if config.scene.white_background else [0] * 768
+    bg_color = [1] * model_2d.embedding_dim if config.scene.white_background else [0] * model_2d.embedding_dim
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
     views = scene.getTrainCameras()
 
@@ -60,8 +58,8 @@ def fuse_one_scene(config, model_2d):
     with torch.no_grad():
         vis_id = torch.zeros((gaussians._xyz.shape[0], len(views)), dtype=int)
         for idx, view in enumerate(tqdm(loader)):
-            # if idx % 5 != 0:
-            #     continue
+            if idx % 5 != 0:
+                continue
             view = view[0]
             view.cuda()
             mapper = PointCloudToImageMapper(
@@ -78,26 +76,13 @@ def fuse_one_scene(config, model_2d):
                 [config.fusion.img_dim[1], config.fusion.img_dim[0]],
             )
 
-            if config.fusion.use_sam_mask:
-                sam_mask = np.load(os.path.join(config.scene.scene_path, "sam_masks", view.image_name + ".npy"))
-                sam_mask = sktf.resize(
-                    sam_mask.transpose(1, 2, 0),
-                    [config.fusion.img_dim[1], config.fusion.img_dim[0]],
-                    order=0,
-                    preserve_range=True,
-                ).transpose(2, 0, 1)
-                for mi in range(sam_mask.shape[0]):
-                    vote = features[:, sam_mask[mi]].mean(dim=1, keepdim=True)
-                    features[:, sam_mask[mi]] = vote
-
             ################################# Save relevancy maps from pretrained models ####################################
             # pretrained_save_path = os.path.join(config.model.model_dir, "render", "pretrained")
             # os.makedirs(pretrained_save_path, exist_ok=True)
 
-            # palette, text_features, _ = get_text_features(
+            # palette, text_features = get_text_features(
             #     model_2d,
-            #     model_2d.get_text(model_2d.classes),
-            #     # config.scene.dataset_name,
+            #     model_2d.classes.split("."),
             # )
             # sim = torch.einsum("cq,qhw->chw", text_features, features.float().cuda())
             # label = sim.argmax(dim=0)
@@ -165,9 +150,9 @@ def fuse_one_scene(config, model_2d):
         ################################ Save relevancy maps from projected gaussians #################################
         # relevancy_save_path = os.path.join(config.model.model_dir, "render", "relevancy")
         # os.makedirs(relevancy_save_path, exist_ok=True)
-        # palette, text_features, _ = get_text_features(
+        # palette, text_features = get_text_features(
         #     model_2d,
-        #     model_2d.get_text(model_2d.classes),
+        #     model_2d.classes.split("."),
         # )
         # sim = torch.einsum("cq,dq->dc", text_features, gaussians._features_semantic)
         # label = sim.argmax(dim=1)
@@ -202,9 +187,9 @@ def fuse_one_scene(config, model_2d):
         ################################ Save semantic maps from projected gaussians #################################
         # semantic_save_path = os.path.join(config.model.model_dir, "render", "semantic")
         # os.makedirs(semantic_save_path, exist_ok=True)
-        # palette, text_features, _ = get_text_features(
+        # palette, text_features = get_text_features(
         #     model_2d,
-        #     model_2d.get_text(model_2d.classes),
+        #     model_2d.classes.split("."),
         # )
         # sim = torch.einsum("cq,dq->dc", text_features.float(), gaussians._features_semantic)
         # label_soft = sim.softmax(dim=1)
@@ -231,7 +216,6 @@ def fuse_one_scene(config, model_2d):
         #         rendering,
         #         os.path.join(semantic_save_path, views.camera_info[idx].image_name + ".jpg"),
         #     )
-
         #################################################################################################################
         # exit()
 
@@ -241,34 +225,40 @@ def fuse_one_scene(config, model_2d):
     else:
         os.makedirs(config.fusion.out_dir, exist_ok=True)
     for n in range(config.fusion.num_rand_file_per_scene):
-        if gaussians._xyz.shape[0] < config.fusion.n_split_points:
-            n_points_cur = gaussians._xyz.shape[0]  # to handle point cloud numbers less than n_split_points
+        save_path = (
+            os.path.join(config.fusion.out_dir + "/%d/%d.pt" % (config.model.dynamic_t, n))
+            if config.model.dynamic
+            else os.path.join(config.fusion.out_dir + "/%d.pt" % (n))
+        )
+        if gaussians._xyz.shape[0] < config.fusion.n_split_points: # to handle point cloud numbers less than n_split_points
+            torch.save(
+            {
+                "feat": gaussians._features_semantic.cpu().half(),
+                "mask_full": torch.ones(gaussians._xyz.shape[0], dtype=torch.bool),
+            },
+            save_path
+        )
         else:
             n_points_cur = config.fusion.n_split_points
+            rand_ind = np.random.choice(range(gaussians._xyz.shape[0]), n_points_cur, replace=False)
 
-        rand_ind = np.random.choice(range(gaussians._xyz.shape[0]), n_points_cur, replace=False)
+            mask_entire = torch.zeros(gaussians._xyz.shape[0], dtype=torch.bool)
+            mask_entire[rand_ind] = True
+            mask = torch.zeros(gaussians._xyz.shape[0], dtype=torch.bool)
+            mask[point_ids] = True
+            mask_entire = mask_entire & mask
 
-        mask_entire = torch.zeros(gaussians._xyz.shape[0], dtype=torch.bool)
-        mask_entire[rand_ind] = True
-        mask = torch.zeros(gaussians._xyz.shape[0], dtype=torch.bool)
-        mask[point_ids] = True
-        mask_entire = mask_entire & mask
-
-        torch.save(
-            {
-                "feat": gaussians._features_semantic[mask_entire].cpu().half(),
-                "mask_full": mask_entire,
-            },
-            (
-                os.path.join(config.fusion.out_dir + "/%d/%d.pt" % (config.model.dynamic_t, n))
-                if config.model.dynamic
-                else os.path.join(config.fusion.out_dir + "/%d.pt" % (n))
-            ),
-        )
+            torch.save(
+                {
+                    "feat": gaussians._features_semantic[mask_entire].cpu().half(),
+                    "mask_full": mask_entire,
+                },
+                save_path
+            )
 
 
 if __name__ == "__main__":
-    config = OmegaConf.load("./config/fusion_mipnerf360.yaml")
+    config = OmegaConf.load("./config/fusion_scannet.yaml")
     override_config = OmegaConf.from_cli()
     config = OmegaConf.merge(config, override_config)
     print(OmegaConf.to_yaml(config))
@@ -280,6 +270,10 @@ if __name__ == "__main__":
         from model.openseg_predictor import OpenSeg
 
         model_2d = OpenSeg("./weights/openseg_exported_clip", "ViT-L/14@336px")
+    elif model_2d_name == "lseg":
+        from model.lseg_predictor import LSeg
+
+        model_2d = LSeg("./weights/lseg/demo_e200.ckpt")
     elif model_2d_name == "samclip":
         from model.samclip_predictor import SAMCLIP
 
@@ -295,6 +289,7 @@ if __name__ == "__main__":
 
     scenes = os.listdir(config.model.model_dir)
     scenes.sort()
+    model_2d.set_predefined_cls(SCANNET20_CLASS_LABELS)
 
     fuse_one_scene(config, model_2d)
 

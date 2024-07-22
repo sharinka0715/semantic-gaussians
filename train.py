@@ -2,14 +2,13 @@ import os
 import uuid
 import torch
 from tqdm import tqdm
-from random import randint
 from functools import partial
 from omegaconf import OmegaConf
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
 from model import GaussianModel
-from model.rgb_renderer import render
+from model.renderer import render
 from scene import Scene
 from utils.system_utils import set_seed
 from utils.loss_utils import l1_loss, ssim, psnr
@@ -98,7 +97,6 @@ def train(config):
     iter_start = torch.cuda.Event(enable_timing=True)
     iter_end = torch.cuda.Event(enable_timing=True)
 
-    viewpoint_stack = None
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, config.train.iterations), desc="Training progress")
     loader = DataLoader(
@@ -138,7 +136,7 @@ def train(config):
         )
 
         # Loss
-        gt_image = viewpoint_cam.original_image.cuda()
+        gt_image = viewpoint_cam.original_image #.cuda()
         if config.train.cut_edge:
             h, w = image.shape[1:3]
             ch, cw = h // 100, w // 100

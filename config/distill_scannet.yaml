@@ -1,5 +1,6 @@
 scene:
   scene_path: "/PATH/TO/YOUR/OWN"
+  dataset_name: "cocomap"
   test_cameras: False
   colmap_images: "images"
   colmap_eval_hold: 8
@@ -19,15 +20,12 @@ model:
   dynamic: False
   load_iteration: 10000
   device: "cuda:0"
-  pretrained_weights_path:
-    - "./weights/openseg_exported_clip"
-    - "ViT-L/14@336px"
 
 fusion:
   out_dir: "/PATH/TO/YOUR/OWN"
 
 distill:
-  exp_name: openseg_new_12wx5_bs1
+  exp_name: openseg_new
   model_3d: MinkUNet34A
   voxel_size: 0.02
   aug: True

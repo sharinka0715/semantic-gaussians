@@ -9,6 +9,8 @@ from segment_anything.automask import SamAutomaticMaskGenerator as MultiScaleMas
 
 
 class SAMCLIP:
+    embedding_dim = 768
+    
     def __init__(self, sam_path, clip_model_name):
         if sam_path is not None:
             print("Load SAM model...")
@@ -29,6 +31,19 @@ class SAMCLIP:
         if clip_model_name is not None:
             print("Loading CLIP {} model...".format(clip_model_name))
             self.clip_model, self.preprocess = clip.load(clip_model_name, device="cuda", jit=False)
+
+    def set_predefined_cls(self, cls):
+        self.classes = ".".join(cls)
+        print(self.classes)
+
+    def set_predefined_part(self, cls, parts):
+        self.classes = ".".join([f"{cls}:{e}" for e in parts])
+        print(self.classes)
+
+    def get_text(self, vocabulary, prefix_prompt="a "):
+        vocabulary = vocabulary.split(".")
+        texts = [prefix_prompt + x.lower().replace(":", " ").replace("_", " ") for x in vocabulary]
+        return texts
 
     def extract_image_feature(self, img_dir, img_size=None):
         """Extract per-pixel OpenSeg features.

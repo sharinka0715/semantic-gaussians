@@ -14,6 +14,8 @@ def read_bytes(path):
 
 
 class OpenSeg:
+    embedding_dim = 768
+    
     def __init__(self, weight_path, text_model_name, set_memory_growth=True):
         # set memory growth to avoid out of memory
         if weight_path is not None:
@@ -32,7 +34,6 @@ class OpenSeg:
             self.text_model, _ = clip.load(text_model_name, device="cuda", jit=False)
 
     def set_predefined_cls(self, cls):
-        # self.classes = ".".join([e for e in (list(PASCAL_PART_VOCAB) + list(LVIS_PACO_VOCAB)) if cls in e])
         self.classes = ".".join(cls)
         print(self.classes)
 

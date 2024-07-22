@@ -1,6 +1,6 @@
 scene:
   scene_path: "/PATH/TO/YOUR/OWN"
-  dataset_name: "scannet_20"
+  dataset_name: "cocomap"
   test_cameras: False
   colmap_images: "images"
   colmap_eval_hold: 8
@@ -20,17 +20,12 @@ model:
   dynamic: False
   load_iteration: -1
   device: "cuda:0"
-  pretrained_weights_path:
-    - "./weights/vlpart/swinbase_part_0a0000.pth"
-    - "./weights/vlpart/sam_vit_h_4b8939.pth"
-    - "ViT-L/14@336px"
 
 fusion:
   img_dim: [540, 960]
   num_workers: 8
-  use_sam_mask: False
-  model_2d: openseg # choose from openseg, samclip, vlpart
-  depth: render
+  model_2d: openseg # choose from openseg, lseg, samclip, vlpart
+  depth: render # choose from image, render, surface, none
   depth_scale: 1000.0
   visibility_threshold: 0.02
   outlier_threshold: -2.0

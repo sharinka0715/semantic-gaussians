@@ -2,22 +2,20 @@ import os
 import cv2
 import clip
 import numpy as np
-import supervision as sv
-from tqdm import tqdm
 from skimage.transform import resize
 
 import torch
-import torchvision
 
 from model.vlpart.vlpart import build_vlpart
 import detectron2.data.transforms as T
 from segment_anything import build_sam, SamPredictor
 from segment_anything.utils.amg import remove_small_regions
-from dataset.scannet.scannet_constants import SCANNET_CLASS_LABELS_200, SCANNET_CLASS_LABELS_20
 from model.vlpart.vocab import LVIS_PACO_VOCAB, PASCAL_PART_VOCAB
 
 
 class VLPart:
+    embedding_dim = 768
+    
     def __init__(
         self,
         vlpart_path,
@@ -25,7 +23,6 @@ class VLPart:
         text_model_name,
         box_threshold=0.3,
         predefined_classes=list(LVIS_PACO_VOCAB) + list(PASCAL_PART_VOCAB),
-        # predefined_classes=list(SCANNET_CLASS_LABELS_20),
     ):
         self.box_threshold = box_threshold
         self.classes = ".".join(predefined_classes)

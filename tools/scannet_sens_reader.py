@@ -5,6 +5,7 @@ modified to support Python3 and batch read.
 
 import os
 import sys
+import math
 import struct
 import argparse
 import numpy as np
@@ -130,10 +131,16 @@ class SensorData:
                 os.path.join(output_path, str(f) + ".txt"),
             )
 
-    def export_intrinsics(self, output_path):
+    def export_intrinsics(self, output_path, image_size=None):
         if not os.path.exists(output_path):
             os.makedirs(output_path)
         print("exporting camera intrinsics to", output_path)
+        if image_size is not None:
+            height, width = image_size
+            self.intrinsic_color[0] = self.intrinsic_color[0] * (width - 0.5) / (self.intrinsic_color[0, 2] * 2)
+            self.intrinsic_color[1] = self.intrinsic_color[1] * (height - 0.5) / (self.intrinsic_color[1, 2] * 2)
+            self.intrinsic_depth[0] = self.intrinsic_depth[0] * (width - 0.5) / (self.intrinsic_depth[0, 2] * 2)
+            self.intrinsic_depth[1] = self.intrinsic_depth[1] * (height - 0.5) / (self.intrinsic_depth[1, 2] * 2)
         self.save_mat_to_file(self.intrinsic_color, os.path.join(output_path, "intrinsic_color.txt"))
         self.save_mat_to_file(self.extrinsic_color, os.path.join(output_path, "extrinsic_color.txt"))
         self.save_mat_to_file(self.intrinsic_depth, os.path.join(output_path, "intrinsic_depth.txt"))
@@ -158,8 +165,8 @@ if __name__ == "__main__":
     parser.add_argument("--not_export_color_images", dest="export_color_images", action="store_false")
     parser.add_argument("--not_export_poses", dest="export_poses", action="store_false")
     parser.add_argument("--not_export_intrinsics", dest="export_intrinsics", action="store_false")
-    parser.add_argument("--export_width", default=320, type=int)
-    parser.add_argument("--export_height", default=240, type=int)
+    parser.add_argument("--export_width", default=648, type=int)
+    parser.add_argument("--export_height", default=484, type=int)
     parser.add_argument("--frame_skip", default=5, type=int)
     parser.set_defaults(
         export_depth_images=True,
@@ -193,4 +200,4 @@ if __name__ == "__main__":
     if opt.export_poses:
         sd.export_poses(os.path.join(output_path, "pose"), opt.frame_skip)
     if opt.export_intrinsics:
-        sd.export_intrinsics(os.path.join(output_path, "intrinsic"))
+        sd.export_intrinsics(os.path.join(output_path, "intrinsic"), (opt.export_height, opt.export_width))

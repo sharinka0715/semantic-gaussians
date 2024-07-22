@@ -21,14 +21,6 @@ model:
   load_iteration: -1
   device: "cuda:0"
 
-fusion:
-  img_dim: [648, 484]
-  num_workers: 8
+render:
+  fusion_dir: "/PATH/TO/YOUR/OWN/*.pt"
   model_2d: openseg # choose from openseg, lseg, samclip, vlpart
-  depth: render # choose from image, render, surface, none
-  depth_scale: 1000.0
-  visibility_threshold: 0.05
-  cut_boundary: 10
-  n_split_points: 999999999 # train: 80000, eval: 999999999 (large enough)
-  num_rand_file_per_scene: 1 # train: 5, eval: 1
-  out_dir: "/PATH/TO/YOUR/OWN"

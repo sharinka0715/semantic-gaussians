@@ -14,10 +14,9 @@ from scene import Scene
 from utils.system_utils import set_seed, searchForMaxIteration
 
 from model.mink_unet import mink_unet
+from model.render_utils import get_text_features
 from model.openseg_predictor import OpenSeg
 from dataset.feature_dataset import FeatureDataset
-from dataset.dynamic_feature_dataset import DynamicFeatureDataset
-from dataset.label_constant import SCANNET_LABELS_20, SCANNET_COLOR_MAP_20
 
 import MinkowskiEngine as ME
 
@@ -73,23 +72,14 @@ def distill(config):
     # )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, config.distill.epochs)
 
-    if config.model.dynamic:
-        dataset = DynamicFeatureDataset(
-            config.model.model_dir,
-            config.fusion.out_dir,
-            config.distill.voxel_size,
-            config.distill.aug,
-            config.distill.feature_type,
-        )
-    else:
-        dataset = FeatureDataset(
-            config.model.model_dir,
-            config.fusion.out_dir,
-            config.model.load_iteration,
-            config.distill.voxel_size,
-            config.distill.aug,
-            config.distill.feature_type,
-        )
+    dataset = FeatureDataset(
+        config.model.model_dir,
+        config.fusion.out_dir,
+        config.model.load_iteration,
+        config.distill.voxel_size,
+        config.distill.aug,
+        config.distill.feature_type,
+    )
 
     loader = DataLoader(
         dataset,
@@ -205,15 +195,7 @@ def eval(config, model_3d, model_2d, voxelizer, iter):
 
     views = scene.getTrainCameras()
     with torch.no_grad():
-        labelset = list(SCANNET_LABELS_20)
-        labelset[-1] = "other"
-        # labelset = ["person", "racket", "tennis ball", "wall", "floor", "other"]
-        scannet_palette = []
-        for _, value in SCANNET_COLOR_MAP_20.items():
-            scannet_palette.append(torch.tensor(value))
-        palette = torch.cat(scannet_palette).cuda()
-
-        text_features = model_2d.extract_text_feature(labelset).float()
+        palette, text_features = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
         sim = torch.einsum("cq,dq->dc", text_features, features_semantic)
         label = sim.argmax(dim=1)
 

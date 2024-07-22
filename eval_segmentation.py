@@ -1,33 +1,19 @@
 import os
-import traceback
-import imageio
-
 import torch
 import torchvision
 import numpy as np
 from copy import deepcopy
 from tqdm import tqdm
-import json
 from omegaconf import OmegaConf
-import skimage.transform as sktf
 
-from model import GaussianModel, render_sem, render_chn
+from model import GaussianModel, render_chn
 from scene import Scene
-from utils.system_utils import set_seed
+from utils.system_utils import set_seed, searchForMaxIteration
 
 from model.mink_unet import mink_unet
-from model.openseg_predictor import OpenSeg
+from model.render_utils import get_mapped_label, get_text_features, render_palette
 from dataset.fusion_utils import Voxelizer
-from dataset.scannet.scannet_constants import (
-    SCANNET_CLASS_LABELS_20,
-    SCANNET_VALID_CLASS_IDS_20,
-    SCANNET_COLOR_MAP_20,
-    SCANNET_CLASS_LABELS_200,
-    SCANNET_COLOR_MAP_200,
-    SCANNET_VALID_CLASS_IDS_200,
-)
 from dataset.scannet.label_mapping import read_label_mapping
-
 from utils import metric
 
 import MinkowskiEngine as ME
@@ -46,72 +32,13 @@ def init_dir(config):
     return ckpt_path
 
 
-def get_text_features(model_2d, dataset_name="scannet_20"):
-    if dataset_name == "scannet_20":
-        labelset = list(SCANNET_CLASS_LABELS_20)
-        valid_classes = SCANNET_VALID_CLASS_IDS_20
-        color_map = SCANNET_COLOR_MAP_20
-        labelset[-1] = "other"  # for OpenSeg
-    elif dataset_name == "scannet_200":
-        labelset = list(SCANNET_CLASS_LABELS_200)
-        valid_classes = SCANNET_VALID_CLASS_IDS_200
-        color_map = SCANNET_COLOR_MAP_200
-
-    scannet_palette = []
-    mapping = []
-    for k in valid_classes:
-        scannet_palette.append(torch.tensor(color_map[k]))
-        mapping.append(k)
-    # add unlabeled label and palette
-    labelset.append("unlabeled")
-    scannet_palette.append(torch.tensor(color_map[0]))
-    mapping.append(0)
-
-    palette = torch.cat(scannet_palette).cuda()
-    text_features = model_2d.extract_text_feature(labelset).float()
-
-    return palette, text_features, mapping
-
-
-def render_palette(label, palette):
-    shape = label.shape
-    label = label.reshape(-1)
-    new_3d = torch.zeros((label.shape[0], 3)).cuda()
-    u_index = torch.unique(label)
-    for index in u_index:
-        new_3d[label == index] = torch.tensor(
-            [
-                palette[index * 3] / 255.0,
-                palette[index * 3 + 1] / 255.0,
-                palette[index * 3 + 2] / 255.0,
-            ]
-        ).cuda()
-
-    return new_3d.reshape(*shape, 3).permute(2, 0, 1)
-
-
-def get_mapped_label(config, image_path, label_mapping):
-    label_path = str(image_path).replace("color", "label-filt").replace(".jpg", ".png")
-    if not os.path.exists(label_path):
-        return None
-
-    label_img = np.array(imageio.imread(label_path))
-    label_img = sktf.resize(label_img, [config.eval.height, config.eval.width], order=0, preserve_range=True)
-    mapped = np.copy(label_img)
-    for k, v in label_mapping.items():
-        mapped[label_img == k] = v
-    label_img = mapped.astype(np.uint8)
-
-    return label_img
-
-
 def evaluate(config):
-    if config.scene.dataset_name == "scannet_20":
+    if config.scene.dataset_name == "scannet20":
+        config.scene.num_classes = 19
+        label_mapping = read_label_mapping("./dataset/scannet/scannetv2-labels.modified.tsv", label_to="scannetid")
+    elif config.scene.dataset_name == "cocomap":
         config.scene.num_classes = 20
-        label_mapping = read_label_mapping("./dataset/scannet/scannetv2-labels.combined.tsv")
-    elif config.scene.dataset_name == "scannet_200":
-        config.scene.num_classes = 200
-        label_mapping = read_label_mapping("./dataset/scannet/scannetv2-labels.combined.tsv", label_to="id")
+        label_mapping = read_label_mapping("./dataset/scannet/scannetv2-labels.modified.tsv", label_to="cocomapid")
 
     if config.distill.feature_type == "all":
         model_3d = mink_unet(in_channels=56, out_channels=768, D=3, arch=config.distill.model_3d).cuda()
@@ -121,16 +48,33 @@ def evaluate(config):
     ckpt_path = init_dir(config)
     model_3d.load_state_dict(torch.load(ckpt_path))
 
-    eval_mink_and_fusion(config, model_3d, label_mapping)
+    if config.eval.eval_mode == "2d":
+        eval_fusion(config, model_3d, label_mapping)
+    elif config.eval.eval_mode == "3d":
+        eval_mink(config, model_3d, label_mapping)
+    elif config.eval.eval_mode == "2d_and_3d":
+        eval_mink_and_fusion(config, model_3d, label_mapping)
+    elif config.eval.eval_mode == "pretrained":
+        eval_seg_model(config, model_3d, label_mapping)
+    elif config.eval.eval_mode == "labelmap":
+        eval_labelmap(config, model_3d, label_mapping)
 
 
 def eval_mink(config, model_3d, label_mapping):
     eval_scene = os.listdir(config.model.model_dir)
     eval_scene.sort()
 
-    model_2d = OpenSeg(None, "ViT-L/14@336px")
+    model_2d_name = config.distill.text_model.lower().replace("_", "")
+    if model_2d_name == "lseg":
+        from model.lseg_predictor import LSeg
 
-    bg_color = [1] * 768 if config.scene.white_background else [0] * 768
+        model_2d = LSeg(None)
+    else:
+        from model.openseg_predictor import OpenSeg
+
+        model_2d = OpenSeg(None, "ViT-L/14@336px")
+
+    bg_color = [1] * model_2d.embedding_dim if config.scene.white_background else [0] * model_2d.embedding_dim
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     confusion = np.zeros((config.scene.num_classes + 1, config.scene.num_classes), dtype=np.ulonglong)
@@ -143,15 +87,18 @@ def eval_mink(config, model_3d, label_mapping):
             eval_config.model.model_dir = os.path.join(eval_config.model.model_dir, scene_name)
             scene = Scene(eval_config.scene)
             gaussians = GaussianModel(eval_config.model.sh_degree)
+            loaded_iter = config.model.load_iteration
+            if loaded_iter == -1:
+                loaded_iter = searchForMaxIteration(os.path.join(eval_config.model.model_dir, "point_cloud"))
             gaussians.load_ply(
                 os.path.join(
                     eval_config.model.model_dir,
                     "point_cloud",
-                    "iteration_10000",
+                    f"iteration_{loaded_iter}",
                     "point_cloud.ply",
                 )
             )
-            gaussians.create_semantic(768)
+            gaussians.create_semantic(model_2d.embedding_dim)
 
             locs, features = gaussians.get_locs_and_features(eval_config.distill.feature_type)
             voxelizer = Voxelizer(voxel_size=config.distill.voxel_size)
@@ -162,26 +109,24 @@ def eval_mink(config, model_3d, label_mapping):
             vox_ind = torch.from_numpy(vox_ind).cuda()
 
             sinput = ME.SparseTensor(features.cuda(), locs.cuda())
-            output = model_3d(sinput).F[:, 768 * 0 : 768 * 1]
+            output = model_3d(sinput).F[:, model_2d.embedding_dim * 0 : model_2d.embedding_dim * 1]
             output /= output.norm(dim=-1, keepdim=True) + 1e-8
 
             views = scene.getTrainCameras()
-            # out_path = "eval_samples/"
-            # os.makedirs(out_path, exist_ok=True)
+            out_path = os.path.join("eval_render", scene_name)
+            os.makedirs(os.path.join(out_path, "gt"), exist_ok=True)
+            os.makedirs(os.path.join(out_path, "3d"), exist_ok=True)  
             gaussians._features_semantic[vox_ind] = output
-            palette, text_features, mapping = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
+            palette, text_features = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
             for idx, view in enumerate(views):
-                if idx % 5 != 0:
-                    continue
+                # if idx % 5 != 0:
+                #     continue
                 view.cuda()
                 gt_path = str(view.image_path)
                 label_img = get_mapped_label(config, gt_path, label_mapping)
                 if label_img is None:
                     continue
-                mapped = np.ones_like(label_img) * config.scene.num_classes
-                for i in range(len(mapping)):
-                    mapped[label_img == mapping[i]] = i
-                label_img = torch.from_numpy(mapped).int().cpu()
+                label_img = torch.from_numpy(label_img).int().cpu()
 
                 if config.eval.pred_on_3d:
                     sim = torch.einsum("cq,dq->dc", text_features, gaussians._features_semantic)
@@ -196,24 +141,26 @@ def eval_mink(config, model_3d, label_mapping):
                         override_color=label_soft,
                         override_shape=[config.eval.width, config.eval.height],
                     )["render"]
-                    label = rendering.argmax(dim=0).cpu()
+                    label = rendering[1:].argmax(dim=0).cpu()
                 else:
-                    rendering = render_sem(
+                    rendering = render_chn(
                         view,
                         gaussians,
                         eval_config.pipeline,
                         background,
+                        num_channels=model_2d.embedding_dim,
                         override_color=gaussians._features_semantic,
                         override_shape=[config.eval.width, config.eval.height],
                     )["render"]
                     rendering = rendering / (rendering.norm(dim=0, keepdim=True) + 1e-8)
                     sim = torch.einsum("cq,qhw->chw", text_features, rendering)
-                    label = sim.argmax(dim=0).cpu()
-
-                # sem = render_palette(label, palette)
-                # sem_gt = render_palette(label_img, palette)
-                # torchvision.utils.save_image(sem, os.path.join(out_path, "{0:05d}".format(idx) + "_render.png"))
-                # torchvision.utils.save_image(sem_gt, os.path.join(out_path, "{0:05d}".format(idx) + ".png"))
+                    label = sim[1:].argmax(dim=0).cpu()
+                
+                label += 1
+                sem = render_palette(label, palette)
+                sem_gt = render_palette(label_img, palette)
+                torchvision.utils.save_image(sem, os.path.join(out_path, "3d", f"{views.camera_info[idx].image_name}.jpg"))
+                torchvision.utils.save_image(sem_gt, os.path.join(out_path, "gt", f"{views.camera_info[idx].image_name}.jpg"))
                 confusion += metric.confusion_matrix(
                     label.cpu().numpy().reshape(-1), label_img.cpu().numpy().reshape(-1), config.scene.num_classes
                 )
@@ -225,9 +172,17 @@ def eval_fusion(config, model_3d, label_mapping):
     eval_scene = os.listdir(config.model.model_dir)
     eval_scene.sort()
 
-    model_2d = OpenSeg(None, "ViT-L/14@336px")
+    model_2d_name = config.fusion.model_2d.lower().replace("_", "")
+    if model_2d_name == "lseg":
+        from model.lseg_predictor import LSeg
 
-    bg_color = [1] * 768 if config.scene.white_background else [0] * 768
+        model_2d = LSeg(None)
+    else:
+        from model.openseg_predictor import OpenSeg
+
+        model_2d = OpenSeg(None, "ViT-L/14@336px")
+
+    bg_color = [1] * model_2d.embedding_dim if config.scene.white_background else [0] * model_2d.embedding_dim
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     confusion = np.zeros((config.scene.num_classes + 1, config.scene.num_classes), dtype=np.ulonglong)
@@ -240,37 +195,38 @@ def eval_fusion(config, model_3d, label_mapping):
             eval_config.model.model_dir = os.path.join(eval_config.model.model_dir, scene_name)
             scene = Scene(eval_config.scene)
             gaussians = GaussianModel(eval_config.model.sh_degree)
+            loaded_iter = config.model.load_iteration
+            if loaded_iter == -1:
+                loaded_iter = searchForMaxIteration(os.path.join(eval_config.model.model_dir, "point_cloud"))
             gaussians.load_ply(
                 os.path.join(
                     eval_config.model.model_dir,
                     "point_cloud",
-                    "iteration_10000",
+                    f"iteration_{loaded_iter}",
                     "point_cloud.ply",
                 )
             )
-            gaussians.create_semantic(768)
+            gaussians.create_semantic(model_2d.embedding_dim)
 
             feature_path = os.path.join(eval_config.fusion.out_dir, scene_name, "0.pt")
             gt = torch.load(feature_path)
             feat, mask_full = gt["feat"], gt["mask_full"]
 
             views = scene.getTrainCameras()
-            # out_path = "eval_samples/"
-            # os.makedirs(out_path, exist_ok=True)
+            out_path = os.path.join("eval_render", scene_name)
+            os.makedirs(os.path.join(out_path, "gt"), exist_ok=True)
+            os.makedirs(os.path.join(out_path, "2d"), exist_ok=True)  
             gaussians._features_semantic[mask_full] = feat.float().cuda()
-            palette, text_features, mapping = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
+            palette, text_features = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
             for idx, view in enumerate(views):
-                if idx % 5 != 0:
-                    continue
+                # if idx % 5 != 0:
+                #     continue
                 view.cuda()
                 gt_path = str(view.image_path)
                 label_img = get_mapped_label(config, gt_path, label_mapping)
                 if label_img is None:
                     continue
-                mapped = np.ones_like(label_img) * config.scene.num_classes
-                for i in range(len(mapping)):
-                    mapped[label_img == mapping[i]] = i
-                label_img = torch.from_numpy(mapped).int().cpu()
+                label_img = torch.from_numpy(label_img).int().cpu()
 
                 if config.eval.pred_on_3d:
                     sim = torch.einsum("cq,dq->dc", text_features, gaussians._features_semantic)
@@ -285,24 +241,26 @@ def eval_fusion(config, model_3d, label_mapping):
                         override_color=label_soft,
                         override_shape=[config.eval.width, config.eval.height],
                     )["render"]
-                    label = rendering.argmax(dim=0).cpu()
+                    label = rendering[1:].argmax(dim=0).cpu()
                 else:
-                    rendering = render_sem(
+                    rendering = render_chn(
                         view,
                         gaussians,
                         eval_config.pipeline,
                         background,
+                        num_channels=model_2d.embedding_dim,
                         override_color=gaussians._features_semantic,
                         override_shape=[config.eval.width, config.eval.height],
                     )["render"]
                     rendering = rendering / (rendering.norm(dim=0, keepdim=True) + 1e-8)
                     sim = torch.einsum("cq,qhw->chw", text_features, rendering)
-                    label = sim.argmax(dim=0).cpu()
+                    label = sim[1:].argmax(dim=0).cpu()
 
-                # sem = render_palette(label, palette)
-                # sem_gt = render_palette(label_img, palette)
-                # torchvision.utils.save_image(sem, os.path.join(out_path, "{0:05d}".format(idx) + "_render.png"))
-                # torchvision.utils.save_image(sem_gt, os.path.join(out_path, "{0:05d}".format(idx) + ".png"))
+                label += 1
+                sem = render_palette(label, palette)
+                sem_gt = render_palette(label_img, palette)
+                torchvision.utils.save_image(sem, os.path.join(out_path, "2d", f"{views.camera_info[idx].image_name}.jpg"))
+                torchvision.utils.save_image(sem_gt, os.path.join(out_path, "gt", f"{views.camera_info[idx].image_name}.jpg"))
                 confusion += metric.confusion_matrix(
                     label.cpu().numpy().reshape(-1), label_img.cpu().numpy().reshape(-1), config.scene.num_classes
                 )
@@ -316,9 +274,29 @@ def eval_mink_and_fusion(config, model_3d, label_mapping):
 
     performance_dict = {}
 
-    model_2d = OpenSeg(None, "ViT-L/14@336px")
+    model_2d_name = config.fusion.model_2d.lower().replace("_", "")
+    if model_2d_name == "lseg":
+        from model.lseg_predictor import LSeg
 
-    bg_color = [1] * 768 if config.scene.white_background else [0] * 768
+        model_2d = LSeg(None)
+    else:
+        from model.openseg_predictor import OpenSeg
+
+        model_2d = OpenSeg(None, "ViT-L/14@336px")
+
+    text_model_name = config.distill.text_model.lower().replace("_", "")
+    if text_model_name == model_2d_name:
+        text_model = model_2d
+    elif text_model_name == "lseg":
+        from model.lseg_predictor import LSeg
+
+        text_model = LSeg(None)
+    else:
+        from model.openseg_predictor import OpenSeg
+
+        text_model = OpenSeg(None, "ViT-L/14@336px")
+
+    bg_color = [1] * model_2d.embedding_dim if config.scene.white_background else [0] * model_2d.embedding_dim
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     confusion = np.zeros((config.scene.num_classes + 1, config.scene.num_classes), dtype=np.ulonglong)
@@ -331,15 +309,18 @@ def eval_mink_and_fusion(config, model_3d, label_mapping):
             eval_config.model.model_dir = os.path.join(eval_config.model.model_dir, scene_name)
             scene = Scene(eval_config.scene)
             gaussians = GaussianModel(eval_config.model.sh_degree)
+            loaded_iter = config.model.load_iteration
+            if loaded_iter == -1:
+                loaded_iter = searchForMaxIteration(os.path.join(eval_config.model.model_dir, "point_cloud"))
             gaussians.load_ply(
                 os.path.join(
                     eval_config.model.model_dir,
                     "point_cloud",
-                    "iteration_10000",
+                    f"iteration_{loaded_iter}",
                     "point_cloud.ply",
                 )
             )
-            gaussians.create_semantic(768 * 2)
+            gaussians.create_semantic(model_2d.embedding_dim + text_model.embedding_dim)
 
             locs, features = gaussians.get_locs_and_features(eval_config.distill.feature_type)
             voxelizer = Voxelizer(voxel_size=config.distill.voxel_size)
@@ -350,38 +331,35 @@ def eval_mink_and_fusion(config, model_3d, label_mapping):
             vox_ind = torch.from_numpy(vox_ind).cuda()
 
             sinput = ME.SparseTensor(features.cuda(), locs.cuda())
-            output = model_3d(sinput).F[:, 768 * 0 : 768 * 1]
-            output /= output.norm(dim=-1, keepdim=True) + 1e-8
+            output = model_3d(sinput).F[:, text_model.embedding_dim * 0 : text_model.embedding_dim * 1]
 
             feature_path = os.path.join(eval_config.fusion.out_dir, scene_name, "0.pt")
             gt = torch.load(feature_path)
-            feat, mask_full = gt["feat"], gt["mask_full"]
+            feat, mask_full = gt["feat"].float(), gt["mask_full"]
 
             views = scene.getTrainCameras()
-            out_path = os.path.join(eval_config.scene.scene_path, "render")
+            out_path = os.path.join("eval_render", scene_name)
             os.makedirs(os.path.join(out_path, "gt"), exist_ok=True)
             os.makedirs(os.path.join(out_path, "2d_and_3d"), exist_ok=True)
             feat /= feat.norm(dim=-1, keepdim=True) + 1e-8
             output /= output.norm(dim=-1, keepdim=True) + 1e-8
-            gaussians._features_semantic[mask_full, :768] = feat.float().cuda()
-            gaussians._features_semantic[vox_ind, 768:] = output
-            palette, text_features, mapping = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
+            gaussians._features_semantic[mask_full, :model_2d.embedding_dim] = feat.float().cuda()
+            gaussians._features_semantic[vox_ind, model_2d.embedding_dim:] = output
+            palette, text_features_2d = get_text_features(model_2d, dataset_name=config.scene.dataset_name)
+            palette, text_features_3d = get_text_features(text_model, dataset_name=config.scene.dataset_name)
 
             for idx, view in enumerate(views):
-                if idx % 5 != 0:
-                    continue
+                # if idx % 5 != 0:
+                #     continue
                 view.cuda()
                 gt_path = str(view.image_path)
                 label_img = get_mapped_label(config, gt_path, label_mapping)
                 if label_img is None:
                     continue
-                mapped = np.ones_like(label_img) * config.scene.num_classes
-                for i in range(len(mapping)):
-                    mapped[label_img == mapping[i]] = i
-                label_img = torch.from_numpy(mapped).int().cpu()
+                label_img = torch.from_numpy(label_img).int().cpu()
 
                 if config.eval.feature_fusion == "concat":
-                    cat_text_features = torch.cat([text_features, text_features], dim=1)
+                    cat_text_features = torch.cat([text_features_2d, text_features_3d], dim=1)
                     if config.eval.pred_on_3d:
                         sim = torch.einsum("cq,dq->dc", cat_text_features, gaussians._features_semantic)
                         label_soft = sim.softmax(dim=1)
@@ -394,33 +372,39 @@ def eval_mink_and_fusion(config, model_3d, label_mapping):
                             override_color=label_soft,
                             override_shape=[config.eval.width, config.eval.height],
                         )["render"]
-                        label = rendering.argmax(dim=0).cpu()
+                        label = rendering[1:].argmax(dim=0).cpu()
                     else:
-                        rendering1 = render_sem(
+                        rendering1 = render_chn(
                             view,
                             gaussians,
                             eval_config.pipeline,
                             background,
-                            override_color=gaussians._features_semantic[:, :768],
+                            num_channels=model_2d.embedding_dim,
+                            override_color=gaussians._features_semantic[:, :model_2d.embedding_dim],
                             override_shape=[config.eval.width, config.eval.height],
                         )["render"]
-                        rendering2 = render_sem(
+                        rendering2 = render_chn(
                             view,
                             gaussians,
                             eval_config.pipeline,
                             background,
-                            override_color=gaussians._features_semantic[:, 768:],
+                            num_channels=text_model.embedding_dim,
+                            override_color=gaussians._features_semantic[:, model_2d.embedding_dim:],
                             override_shape=[config.eval.width, config.eval.height],
                         )["render"]
                         rendering = torch.cat([rendering1, rendering2], dim=0)
                         rendering = rendering / (rendering.norm(dim=0, keepdim=True) + 1e-8)
                         sim = torch.einsum("cq,qhw->chw", cat_text_features, rendering)
-                        label = sim.argmax(dim=0).cpu()
+                        label = sim[1:].argmax(dim=0).cpu()
                 elif config.eval.feature_fusion == "argmax":
                     if config.eval.pred_on_3d:
-                        sim = torch.einsum(
-                            "cq,dzq->dzc", text_features, gaussians._features_semantic.reshape(-1, 2, 768)
+                        sim_2d = torch.einsum(
+                            "cq,dq->dc", text_features_2d, gaussians._features_semantic[:, :model_2d.embedding_dim]
                         )
+                        sim_3d = torch.einsum(
+                            "cq,dq->dc", text_features_3d, gaussians._features_semantic[:, model_2d.embedding_dim:]
+                        )
+                        sim = torch.stack([sim_2d, sim_3d], dim=1)
                         label_soft = sim.max(dim=1).values.softmax(dim=1)
                         rendering = render_chn(
                             view,
@@ -431,74 +415,42 @@ def eval_mink_and_fusion(config, model_3d, label_mapping):
                             override_color=label_soft,
                             override_shape=[config.eval.width, config.eval.height],
                         )["render"]
-                        label = rendering.argmax(dim=0).cpu()
+                        label = rendering[1:].argmax(dim=0).cpu()
                     else:
-                        rendering1 = render_sem(
+                        rendering1 = render_chn(
                             view,
                             gaussians,
                             eval_config.pipeline,
                             background,
-                            override_color=gaussians._features_semantic[:, :768],
+                            num_channels=model_2d.embedding_dim,
+                            override_color=gaussians._features_semantic[:, :model_2d.embedding_dim],
                             override_shape=[config.eval.width, config.eval.height],
                         )["render"]
-                        rendering2 = render_sem(
+                        rendering2 = render_chn(
                             view,
                             gaussians,
                             eval_config.pipeline,
                             background,
-                            override_color=gaussians._features_semantic[:, 768:],
+                            num_channels=text_model.embedding_dim,
+                            override_color=gaussians._features_semantic[:, model_2d.embedding_dim:],
                             override_shape=[config.eval.width, config.eval.height],
                         )["render"]
-                        rendering = torch.stack([rendering1, rendering2], dim=1)
-                        rendering = rendering / (rendering.norm(dim=0, keepdim=True) + 1e-8)
-                        sim = torch.einsum("cq,qzhw->czhw", text_features, rendering)
-                        label = sim.max(dim=1).values.argmax(dim=0).cpu()
-                elif config.eval.feature_fusion == "mean":
-                    if config.eval.pred_on_3d:
-                        sim = torch.einsum(
-                            "cq,dq->dc", text_features, gaussians._features_semantic.reshape(-1, 2, 768).mean(dim=1)
-                        )
-                        label_soft = sim.softmax(dim=1)
-                        rendering = render_chn(
-                            view,
-                            gaussians,
-                            eval_config.pipeline,
-                            background,
-                            num_channels=label_soft.shape[1],
-                            override_color=label_soft,
-                            override_shape=[config.eval.width, config.eval.height],
-                        )["render"]
-                        label = rendering.argmax(dim=0).cpu()
-                    else:
-                        rendering1 = render_sem(
-                            view,
-                            gaussians,
-                            eval_config.pipeline,
-                            background,
-                            override_color=gaussians._features_semantic[:, :768],
-                            override_shape=[config.eval.width, config.eval.height],
-                        )["render"]
-                        rendering2 = render_sem(
-                            view,
-                            gaussians,
-                            eval_config.pipeline,
-                            background,
-                            override_color=gaussians._features_semantic[:, 768:],
-                            override_shape=[config.eval.width, config.eval.height],
-                        )["render"]
-                        rendering = torch.stack([rendering1, rendering2], dim=1).mean(dim=1)
-                        rendering = rendering / (rendering.norm(dim=0, keepdim=True) + 1e-8)
-                        sim = torch.einsum("cq,qhw->chw", text_features, rendering)
-                        label = sim.argmax(dim=0).cpu()
+                        rendering1 = rendering1 / (rendering1.norm(dim=0, keepdim=True) + 1e-8)
+                        rendering2 = rendering2 / (rendering2.norm(dim=0, keepdim=True) + 1e-8)
+                        sim_2d = torch.einsum("cq,qhw->chw", text_features_2d, rendering1)
+                        sim_3d = torch.einsum("cq,qhw->chw", text_features_3d, rendering2)
+                        sim = torch.stack([sim_2d, sim_3d], dim=1)
+                        label = sim[1:].max(dim=1).values.argmax(dim=0).cpu()
 
-                # sem = render_palette(label, palette)
-                # sem_gt = render_palette(label_img, palette)
-                # torchvision.utils.save_image(
-                #     sem, os.path.join(out_path, "2d_and_3d", f"{views.camera_info[idx].image_name}.jpg")
-                # )
-                # torchvision.utils.save_image(
-                #     sem_gt, os.path.join(out_path, "gt", f"{views.camera_info[idx].image_name}.jpg")
-                # )
+                label += 1
+                sem = render_palette(label, palette)
+                sem_gt = render_palette(label_img, palette)
+                torchvision.utils.save_image(
+                    sem, os.path.join(out_path, "2d_and_3d", f"{views.camera_info[idx].image_name}.jpg")
+                )
+                torchvision.utils.save_image(
+                    sem_gt, os.path.join(out_path, "gt", f"{views.camera_info[idx].image_name}.jpg")
+                )
                 confusion_img = metric.confusion_matrix(
                     label.cpu().numpy().reshape(-1), label_img.cpu().numpy().reshape(-1), config.scene.num_classes
                 )
@@ -511,15 +463,27 @@ def eval_seg_model(config, model_3d, label_mapping):
     eval_scene = os.listdir(config.model.model_dir)
     eval_scene.sort()
 
-    model_2d_name = config.eval.model_2d.lower().replace("_", "")
+    model_2d_name = config.fusion.model_2d.lower().replace("_", "")
     if model_2d_name == "openseg":
         from model.openseg_predictor import OpenSeg
 
-        model_2d = OpenSeg(*config.model.pretrained_weights_path)
+        model_2d = OpenSeg("./weights/openseg_exported_clip", "ViT-L/14@336px")
+    elif model_2d_name == "lseg":
+        from model.lseg_predictor import LSeg
+
+        model_2d = LSeg("./weights/lseg/demo_e200.ckpt")
+    elif model_2d_name == "samclip":
+        from model.samclip_predictor import SAMCLIP
+
+        model_2d = SAMCLIP("./weights/groundingsam/sam_vit_h_4b8939.pth", "ViT-L/14@336px")
     elif model_2d_name == "vlpart":
         from model.vlpart_predictor import VLPart
 
-        model_2d = VLPart(*config.model.pretrained_weights_path)
+        model_2d = VLPart(
+            "./weights/vlpart/swinbase_part_0a0000.pth",
+            "./weights/vlpart/sam_vit_h_4b8939.pth",
+            "ViT-L/14@336px",
+        )
 
     confusion = np.zeros((config.scene.num_classes + 1, config.scene.num_classes), dtype=np.ulonglong)
 
@@ -532,22 +496,19 @@ def eval_seg_model(config, model_3d, label_mapping):
             scene = Scene(eval_config.scene)
 
             views = scene.getTrainCameras()
-            out_path = os.path.join(eval_config.scene.scene_path, "render")
+            out_path = os.path.join("eval_render", scene_name)
             os.makedirs(os.path.join(out_path, "gt"), exist_ok=True)
-            os.makedirs(os.path.join(out_path, "pretrained"), exist_ok=True)
-            palette, text_features, mapping = get_text_features(model_2d, config.scene.dataset_name)
+            os.makedirs(os.path.join(out_path, model_2d_name), exist_ok=True)
+            palette, text_features = get_text_features(model_2d, config.scene.dataset_name)
             for idx, view in enumerate(tqdm(views)):
-                if idx % 5 != 0:
-                    continue
+                # if idx % 5 != 0:
+                #     continue
                 view.cuda()
                 gt_path = str(view.image_path)
                 label_img = get_mapped_label(config, gt_path, label_mapping)
                 if label_img is None:
                     continue
-                mapped = np.ones_like(label_img) * config.scene.num_classes
-                for i in range(len(mapping)):
-                    mapped[label_img == mapping[i]] = i
-                label_img = torch.from_numpy(mapped).int().cpu()
+                label_img = torch.from_numpy(label_img).int().cpu()
 
                 features = model_2d.extract_image_feature(
                     gt_path,
@@ -559,7 +520,7 @@ def eval_seg_model(config, model_3d, label_mapping):
                 sem = render_palette(label, palette)
                 sem_gt = render_palette(label_img, palette)
                 torchvision.utils.save_image(
-                    sem, os.path.join(out_path, "pretrained", f"{views.camera_info[idx].image_name}.jpg")
+                    sem, os.path.join(out_path, model_2d_name, f"{views.camera_info[idx].image_name}.jpg")
                 )
                 torchvision.utils.save_image(
                     sem_gt, os.path.join(out_path, "gt", f"{views.camera_info[idx].image_name}.jpg")
@@ -571,8 +532,62 @@ def eval_seg_model(config, model_3d, label_mapping):
     metric.evaluate_confusion(confusion, stdout=True, dataset=config.scene.dataset_name)
 
 
+def eval_labelmap(config, model_3d, label_mapping):
+    eval_scene = os.listdir(config.model.model_dir)
+    eval_scene.sort()
+
+    confusion = np.zeros((config.scene.num_classes + 1, config.scene.num_classes), dtype=np.ulonglong)
+    from model.openseg_predictor import OpenSeg
+
+    model_2d = OpenSeg(None, "ViT-L/14@336px")
+
+    for i, scene_name in enumerate(tqdm(eval_scene)):
+        torch.cuda.empty_cache()
+        with torch.no_grad():
+            eval_config = deepcopy(config)
+            eval_config.scene.scene_path = os.path.join(eval_config.scene.scene_path, scene_name)
+            eval_config.model.model_dir = os.path.join(eval_config.model.model_dir, scene_name, "2")
+            scene = Scene(eval_config.scene)
+
+            views = scene.getTrainCameras()
+            out_path = os.path.join("eval_render_langsplat_2", scene_name)
+            os.makedirs(os.path.join(out_path, "gt"), exist_ok=True)
+            os.makedirs(os.path.join(out_path, "labelmap"), exist_ok=True)
+            palette, _ = get_text_features(model_2d, config.scene.dataset_name)
+
+            label_map_pts = os.listdir(eval_config.model.model_dir)
+            for idx, view in enumerate(tqdm(views)):
+                name = view.image_name.split(".")[0]
+                if f"{name}.pt" not in label_map_pts:
+                    continue
+
+                gt_path = str(view.image_path)
+                label_img = get_mapped_label(config, gt_path, label_mapping)
+                if label_img is None:
+                    continue
+                label_img = torch.from_numpy(label_img).int().cpu()
+
+                label = torch.load(os.path.join(eval_config.model.model_dir, f"{name}.pt"))
+                label += 1
+
+                sem = render_palette(label, palette)
+                sem_gt = render_palette(label_img, palette)
+                torchvision.utils.save_image(
+                    sem, os.path.join(out_path, "labelmap", f"{views.camera_info[idx].image_name}.jpg")
+                )
+                torchvision.utils.save_image(
+                    sem_gt, os.path.join(out_path, "gt", f"{views.camera_info[idx].image_name}.jpg")
+                )
+                confusion += metric.confusion_matrix(
+                    label.cpu().numpy().reshape(-1), label_img.cpu().numpy().reshape(-1), config.scene.num_classes
+                )
+
+    metric.evaluate_confusion(confusion, stdout=True, dataset=config.scene.dataset_name)
+
 if __name__ == "__main__":
     config = OmegaConf.load("./config/eval.yaml")
+    override_config = OmegaConf.from_cli()
+    config = OmegaConf.merge(config, override_config)
     print(OmegaConf.to_yaml(config))
 
     set_seed(config.pipeline.seed)

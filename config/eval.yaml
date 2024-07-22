@@ -1,6 +1,6 @@
 scene:
-  dataset_name: "scannet_20"
   scene_path: "/PATH/TO/YOUR/OWN"
+  dataset_name: "cocomap"
   test_cameras: False
   colmap_images: "images"
   colmap_eval_hold: 8
@@ -17,26 +17,25 @@ pipeline:
 model:
   sh_degree: 3
   model_dir: "/PATH/TO/YOUR/OWN"
-  load_iteration: 10000
+  load_iteration: -1
   device: "cuda:0"
-  pretrained_weights_path:
-    - "./weights/openseg_exported_clip"
-    - "ViT-L/14@336px"
 
 fusion:
   out_dir: "/PATH/TO/YOUR/OWN"
+  model_2d: openseg
 
 distill:
   model_3d: MinkUNet34A
   model_dir: "/PATH/TO/YOUR/OWN"
+  text_model: openseg
   voxel_size: 0.02
   iteration: 100
   feature_type: all
 
 eval:
-  model_2d: openseg
+  eval_mode: labelmap # choose from 2d, 3d, 2d_and_3d, pretrained, labelmap
   width: 648
   height: 484
   pred_on_3d: True
-  feature_fusion: argmax # choose from concat, argmax, mean 
+  feature_fusion: concat # choose from concat, argmax
 

@@ -3,11 +3,11 @@ import zipfile
 from tqdm import tqdm
 import traceback
 
-LABEL_ROOT = "/PATH/TO/YOUR/SCANNET/RAW"
-OUT_ROOT = "/PATH/TO/YOUR/SCANNET/EXTRACTED"
+LABEL_ROOT = "/home/guojun/gaussian_splatting/datasets/scannet_12scene_sens/"
+OUT_ROOT = "/home/guojun/gaussian_splatting/datasets/scannet_12scene_extract/"
 
 
-for split in ["val"]:
+for split in [""]:
     ls = os.listdir(os.path.join(OUT_ROOT, split))
     ls.sort()
     for scene in tqdm(ls):
@@ -17,7 +17,7 @@ for split in ["val"]:
 
         out_path = os.path.join(OUT_ROOT, split, scene)
         os.makedirs(out_path, exist_ok=True)
-        label_zip = os.path.join(LABEL_ROOT, f"{scene}_2d-label-filt.zip")
+        label_zip = os.path.join(LABEL_ROOT, split, scene, f"{scene}_2d-label-filt.zip")
         with zipfile.ZipFile(label_zip, "r") as zip_ref:
             for img in ext_imgs:
                 try:

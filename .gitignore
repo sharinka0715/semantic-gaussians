@@ -4,6 +4,7 @@ results_distill/
 semantic/
 eval_samples/
 fusion/
+*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -2,39 +2,35 @@ import os
 import cv2
 import time
 import torch
-import torchvision
-from pathlib import Path
 import viser
 from copy import deepcopy
 from viser.transforms import SE3, SO3
 import numpy as np
-from tqdm import tqdm
 from omegaconf import OmegaConf
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
 
-from model import GaussianModel, render, render_sem, render_chn
+from model import GaussianModel, render, render_chn
 from model.openseg_predictor import OpenSeg
+from model.lseg_predictor import LSeg
 from model.render_utils import render_palette
 from scene import Scene
 from utils.system_utils import searchForMaxIteration, set_seed
-from utils.graphics_utils import fov2focal
 from utils.camera_utils import get_camera_viser
 from utils.sh_utils import RGB2SH, SH2RGB
-from dataset.scannet.scannet_constants import SCANNET_COLOR_MAP_20, SCANNET_VALID_CLASS_IDS_20
+from dataset.scannet.scannet_constants import COLORMAP
 
 
 def to_hex(color):
     return "{:02x}{:02x}{:02x}".format(int(color[0]), int(color[1]), int(color[2]))
 
 
-def get_text(vocabulary, prefix_prompt="a "):
-    texts = [prefix_prompt + x.lower().replace(":", " ").replace("_", " ") for x in vocabulary]
+def get_text(vocabulary, prefix_prompt=""):
+    texts = [prefix_prompt + x.lower().replace("_", " ") for x in vocabulary]
     return texts
 
 
-def render_set(config):
+def main(config):
     with torch.no_grad():
+        # Load 3D Gaussians
         scene_config = deepcopy(config)
         if config.model.dynamic:
             scene_config.scene.scene_path = os.path.join(config.scene.scene_path, "0")
@@ -60,38 +56,8 @@ def render_set(config):
                 )
         else:
             raise NotImplementedError
-
-        server = viser.ViserServer()
-        server.world_axes.visible = False
-        need_update = False
-        need_up_compute = False
-        need_color_compute = True
-        tab_group = server.add_gui_tab_group()
-
-        with tab_group.add_tab("Settings", viser.Icon.SETTINGS):
-            gui_render_mode = server.add_gui_button_group("Render mode", ("RGB", "Depth", "Semantic", "Relevancy"))
-            render_mode = "RGB"
-            gui_near_slider = server.add_gui_slider("Depth near", min=0, max=3, step=0.2, initial_value=1.5)
-            gui_far_slider = server.add_gui_slider("Depth far", min=6, max=20, step=0.5, initial_value=6)
-            gui_scale_slider = server.add_gui_slider("Gaussian scale", min=0.01, max=1, step=0.01, initial_value=1)
-            gui_background_checkbox = server.add_gui_checkbox("Remove background", False)
-            gui_up_checkbox = server.add_gui_checkbox("Lock up direction", False)
-
-            gui_prompt_input = server.add_gui_text(
-                "Text prompt (divided by comma)",
-                # "wall,floor,cabinet,bed,chair,sofa,table,door,window,bookshelf,picture,counter,desk,curtain,refrigerator,shower curtain,toilet,sink,bathtub",
-                "wall,floor,sofa,table,television,plant,bookshelf,piano,door,speaker,slippers,bottle",
-            )
-
-            gui_edit_mode = server.add_gui_button_group("Edit mode", ("Remove", "Color", "Size", "Move"))
-            edit_mode = "Remove"
-            gui_edit_input = server.add_gui_text("Edit prompt (divided by comma)", "")
-            gui_preserve_input = server.add_gui_text("Preserve prompt (divided by comma)", "")
-            gui_prompt_button = server.add_gui_button("Apply text prompt")
-
-        with tab_group.add_tab("Colormap", viser.Icon.COLOR_FILTER):
-            gui_markdown = server.add_gui_markdown("")
-
+        
+        # Load semantic embeddings
         fusion = torch.load(config.render.fusion_dir)
         features, mask = fusion["feat"].float().cuda(), fusion["mask_full"].cuda()
         original_opacity = gaussians._opacity.detach().clone()
@@ -99,11 +65,17 @@ def render_set(config):
         original_color = gaussians._features_dc.detach().clone()
         original_coord = gaussians._xyz.detach().clone()
 
-        features_save = torch.zeros((mask.shape[0], 768)).float().cuda()
+        # Create text encoding model
+        if config.render.model_2d == "lseg": # 512dim CLIP
+            text_model = LSeg(None)
+        else: # 768dim CLIP
+            text_model = OpenSeg(None, "ViT-L/14@336px")
+
+        features_save = torch.zeros((mask.shape[0], text_model.embedding_dim)).float().cuda()
         features_save[mask] = features
 
-        text_model = OpenSeg(None, "ViT-L/14@336px")
-        colormap = [SCANNET_COLOR_MAP_20[k] for k in [0] + list(SCANNET_VALID_CLASS_IDS_20)]
+        # Initialize colormap and camera
+        colormap = COLORMAP
         colormap_hex = [to_hex(e) for e in colormap]
         colormap_cuda = torch.tensor(colormap).cuda()
 
@@ -112,8 +84,45 @@ def render_set(config):
         scene_camera = scene.getTrainCameras()[0]
         width, height = scene_camera.image_width, scene_camera.image_height
         w2c = scene_camera.world_view_transform.cpu().numpy().transpose()
-        last_wxyz = np.array([0.0, 0, 0, 0])
+        
+        # Initialize viser
+        server = viser.ViserServer()
+        server.world_axes.visible = False
+        need_update = False
+        need_color_compute = True
+        tab_group = server.add_gui_tab_group()
 
+        # Settings tab
+        with tab_group.add_tab("Settings", viser.Icon.SETTINGS):
+            gui_render_mode = server.add_gui_button_group("Render mode", ("RGB", "Depth", "Semantic", "Relevancy"))
+            render_mode = "RGB"
+            gui_near_slider = server.add_gui_slider("Depth near", min=0, max=3, step=0.2, initial_value=1.5)
+            gui_far_slider = server.add_gui_slider("Depth far", min=6, max=20, step=0.5, initial_value=6)
+            gui_scale_slider = server.add_gui_slider("Gaussian scale", min=0.01, max=1, step=0.01, initial_value=1)
+            resolution_scale_group = server.add_gui_button_group("Resolution scale", ("0.5x", "1x", "2x", "4x"))
+            gui_background_checkbox = server.add_gui_checkbox("Remove background", False)
+            gui_up_checkbox = server.add_gui_checkbox("Lock up direction", False)
+
+            gui_prompt_input = server.add_gui_text(
+                "Text prompt (divided by comma)",
+                "wall,floor,cabinet,bed,chair,sofa,table,door,window,bookshelf,picture,counter,desk,curtain,refrigerator,shower curtain,toilet,sink,bathtub",
+                # "wall,floor,sofa,table,television,plant,bookshelf,piano,door,speaker,slippers,bottle",
+            )
+
+            gui_prompt_button = server.add_gui_button("Apply text prompt")
+
+        with tab_group.add_tab("Editing", viser.Icon.SETTINGS):
+            gui_edit_mode = server.add_gui_button_group("Edit mode", ("Remove", "Color", "Size", "Move"))
+            edit_mode = "Remove"
+            gui_edit_input = server.add_gui_text("Edit prompt (divided by comma)", "")
+            gui_preserve_input = server.add_gui_text("Preserve prompt (divided by comma)", "")
+            gui_editing_button = server.add_gui_button("Apply editing prompt")
+
+        # Colormap tab
+        with tab_group.add_tab("Colormap", viser.Icon.COLOR_FILTER):
+            gui_markdown = server.add_gui_markdown("")
+
+        # Button callbacks
         @gui_render_mode.on_click
         def _(_) -> None:
             nonlocal render_mode
@@ -131,7 +140,17 @@ def render_set(config):
             nonlocal need_color_compute
             need_color_compute = True
 
+        @gui_editing_button.on_click
+        def _(_) -> None:
+            nonlocal need_color_compute
+            need_color_compute = True
+
         @gui_scale_slider.on_update
+        def _(_) -> None:
+            nonlocal need_color_compute
+            need_color_compute = True
+
+        @resolution_scale_group.on_click
         def _(_) -> None:
             nonlocal need_color_compute
             need_color_compute = True
@@ -150,6 +169,7 @@ def render_set(config):
                 nonlocal need_update
                 need_update = True
 
+        # Main render function. Render if camera moves or settings change.
         if config.model.dynamic:
             start_time = time.time()
             num_timesteps = config.model.num_timesteps
@@ -159,6 +179,7 @@ def render_set(config):
                 passed_frames = passed_time * config.render.dynamic_fps
                 t = int(passed_frames % num_timesteps)
             if need_color_compute:
+                # Compute text embeddings and relevancy
                 labelset = ["other"] + get_text(gui_prompt_input.value.split(","))
                 text_features = text_model.extract_text_feature(labelset).float()
                 sim = torch.einsum("cq,dq->dc", text_features, features)
@@ -172,6 +193,7 @@ def render_set(config):
                 color_save = torch.zeros((mask.shape[0], 3)).float().cuda()
                 color_save[mask] = colors
 
+                # Reset colormap tab
                 color_mapping = list(zip(labelset, colormap_hex))
                 content_head = "| | |\n|:-:|:-|"
                 content_body = "".join(
@@ -182,6 +204,11 @@ def render_set(config):
                 )
                 gui_markdown.content = content_head + content_body
 
+                # Shape control
+                height = int(float(resolution_scale_group.value[:-1]) * scene_camera.image_height)
+                width = int(float(resolution_scale_group.value[:-1]) * scene_camera.image_width)
+
+                # Scene editing control
                 if gui_edit_input.value != "":
                     len_edit = len(gui_edit_input.value.split(","))
                     edit_features = text_model.extract_text_feature(
@@ -225,6 +252,8 @@ def render_set(config):
                     gaussians._xyz[:] = original_coord
 
                 need_color_compute = False
+
+            # Render for each client
             for client in server.get_clients().values():
                 client_info = client.camera
                 w2c_matrix = (
@@ -232,7 +261,6 @@ def render_set(config):
                 )
                 if not gui_up_checkbox.value:
                     client.camera.up_direction = SO3(client.camera.wxyz) @ np.array([0.0, -1.0, 0.0])
-                last_wxyz = client_info.wxyz
                 new_camera = get_camera_viser(
                     scene_camera,
                     w2c_matrix[:3, :3].transpose(),
@@ -250,6 +278,7 @@ def render_set(config):
                         config.pipeline,
                         background,
                         scaling_modifier=gui_scale_slider.value,
+                        override_shape=(width, height),
                         foreground=gaussians.is_fg if gui_background_checkbox.value else None,
                     )
                     rendering = output["render"].cpu().numpy().transpose(1, 2, 0)
@@ -260,6 +289,7 @@ def render_set(config):
                         config.pipeline,
                         background,
                         scaling_modifier=gui_scale_slider.value,
+                        override_shape=(width, height),
                         foreground=gaussians.is_fg if gui_background_checkbox.value else None,
                     )
                     rendering = output["depth"].cpu().numpy().transpose(1, 2, 0)
@@ -276,17 +306,12 @@ def render_set(config):
                         config.pipeline,
                         background,
                         scaling_modifier=gui_scale_slider.value,
-                        # override_color=features_save,
-                        # override_color=color_save,
                         num_channels=soft_save.shape[1],
                         override_color=soft_save,
+                        override_shape=(width//2, height//2),
                         foreground=gaussians.is_fg if gui_background_checkbox.value else None,
                     )
                     sim = output["render"]
-                    # rendering = output["render"].cpu().numpy().transpose(1, 2, 0)
-                    # rendering = output["render"]
-                    # rendering = rendering / (rendering.norm(dim=0, keepdim=True) + 1e-8)
-                    # sim = torch.einsum("cq,qhw->chw", text_features, rendering)
                     label = sim.argmax(dim=0).cpu()
                     sem = render_palette(label, colormap_cuda.reshape(-1))
                     rendering = sem.cpu().numpy().transpose(1, 2, 0)
@@ -297,9 +322,8 @@ def render_set(config):
                         config.pipeline,
                         background,
                         scaling_modifier=gui_scale_slider.value,
-                        # override_color=features_save,
                         override_color=color_save,
-                        # override_color=features_save,
+                        override_shape=(width//2, height//2),
                         foreground=gaussians.is_fg if gui_background_checkbox.value else None,
                     )
                     rendering = output["render"].cpu().numpy().transpose(1, 2, 0)
@@ -307,10 +331,10 @@ def render_set(config):
 
 
 if __name__ == "__main__":
-    config = OmegaConf.load("./config/fusion_mipnerf360.yaml")
+    config = OmegaConf.load("./config/view_scannet.yaml")
     override_config = OmegaConf.from_cli()
     config = OmegaConf.merge(config, override_config)
     print(OmegaConf.to_yaml(config))
 
     set_seed(config.pipeline.seed)
-    render_set(config)
+    main(config)

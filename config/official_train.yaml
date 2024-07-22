@@ -21,13 +21,13 @@ model:
   random_init: False
 
 train:
-  exp_name: "/PATH/TO/YOUR/OWN"
+  exp_name: "EXP_NAME"
   iterations: 30000
   num_workers: 8
-  test_iterations: [7000, 30000]
+  test_iterations: [100, 7000, 30000]
   save_iterations: [7000, 30000]
   checkpoint_iterations: []
-  cut_edge: False  # If ScanNet, set True to cut the black edge
+  cut_edge: False  # If ScanNet, set True to cut the 1% black edge
 
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
